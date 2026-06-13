@@ -6,6 +6,7 @@ PYTHON_BIN="${PYTHON:-python3}"
 "$PYTHON_BIN" -m compileall scripts
 test -f site/index.html
 test -f site/style.css
+test -f site/kindle.js
 
 pages="
 kinh-sach
@@ -22,6 +23,7 @@ for page in $pages; do
   test -f "$file"
   test -s "$file"
   grep -q '<main>' "$file"
+  grep -q 'kindle.js' "$file"
   grep -q 'Trang chủ' "$file"
   ! grep -q 'Update Required' "$file"
   ! grep -q 'Flash plugin' "$file"
