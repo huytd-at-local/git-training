@@ -68,8 +68,8 @@ PRAYERS = [
     ("Kinh Tối", "kinh-toi"),
 ]
 
-PAGE_TARGET_UNITS = 18
-FIRST_PAGE_TARGET_UNITS = 16
+PAGE_TARGET_UNITS = 16
+FIRST_PAGE_TARGET_UNITS = 14
 CHARS_PER_READING_LINE = 30
 MIN_UNITS_BEFORE_HEADING_BREAK = 7
 MIN_PAGE_UNITS = 7
@@ -1241,19 +1241,42 @@ def rebalance_short_pages(pages: list[list[str]]) -> list[list[str]]:
             index += 1
             continue
 
-        if index == len(pages) - 1:
-            pages[index - 1].extend(pages[index])
-            del pages[index]
-            continue
+        current_units = page_units(pages[index])
+        if index < len(pages) - 1 and pages[index + 1]:
+            next_block = pages[index + 1][0]
+            next_units = block_units(next_block)
+            if current_units + next_units <= PAGE_TARGET_UNITS:
+                pages[index].append(pages[index + 1].pop(0))
+                if not pages[index + 1]:
+                    del pages[index + 1]
+                continue
 
-        combined_with_next = page_units(pages[index]) + page_units(pages[index + 1])
-        if combined_with_next <= PAGE_TARGET_UNITS + MIN_PAGE_UNITS:
-            pages[index].extend(pages[index + 1])
-            del pages[index + 1]
+        if index > 0 and pages[index - 1]:
+            previous_block = pages[index - 1][-1]
+            previous_units = block_units(previous_block)
+            previous_remaining_units = page_units(pages[index - 1][:-1])
+            if (
+                current_units + previous_units <= PAGE_TARGET_UNITS
+                and previous_remaining_units >= MIN_PAGE_UNITS
+            ):
+                pages[index].insert(0, pages[index - 1].pop())
+                continue
+
+        if index == len(pages) - 1 and pages[index - 1]:
+            combined_units = page_units(pages[index - 1]) + current_units
+            if combined_units <= PAGE_TARGET_UNITS:
+                pages[index - 1].extend(pages[index])
+                del pages[index]
+                continue
+
+        index += 1
+
+    index = 0
+    while index < len(pages):
+        if pages[index]:
             index += 1
-        else:
-            pages[index - 1].extend(pages[index])
-            del pages[index]
+            continue
+        del pages[index]
     return pages
 
 
