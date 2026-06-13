@@ -1335,33 +1335,6 @@ def page_nav_html(
     )
 
 
-def reader_page_html(
-    title: str,
-    body: str,
-    updated: str,
-    nav: str,
-    liturgical_day: LiturgicalDay | None,
-    page_number: int,
-) -> str:
-    metadata_html = ""
-    if page_number == 1:
-        metadata_html = (
-            f"    <h1>{html.escape(title)}</h1>\n"
-            f'    <p class="updated">Cập nhật: {html.escape(updated)}</p>\n'
-            f"    {liturgical_day_html(liturgical_day)}\n"
-        )
-    else:
-        metadata_html = f'    <p class="updated">Trang {page_number}</p>\n'
-    return (
-        f'<section class="reader-page" id="page-{page_number}">\n'
-        f"    {nav}\n"
-        f"{metadata_html}"
-        f"    {body}\n"
-        f"    {nav}\n"
-        "</section>"
-    )
-
-
 def write_site(prayers: list[Prayer], liturgical_day: LiturgicalDay | None = None) -> None:
     SITE_DIR.mkdir(parents=True, exist_ok=True)
     error_page = SITE_DIR / "error.html"
@@ -1393,39 +1366,37 @@ def write_site(prayers: list[Prayer], liturgical_day: LiturgicalDay | None = Non
     for index, prayer in enumerate(ordered):
         pages = paginated[prayer.slug]
         page_count = len(pages)
-        rendered_pages: list[str] = []
         for page_index, page_body in enumerate(pages, start=1):
             previous_href = None
             next_href = None
 
             if page_index > 1:
-                previous_href = f"#page-{page_index - 1}"
+                previous_href = prayer_page_filename(prayer.slug, page_index - 1)
             elif index > 0:
                 previous_prayer = ordered[index - 1]
-                previous_href = f"{previous_prayer.slug}.html#page-{len(paginated[previous_prayer.slug])}"
+                previous_href = prayer_page_filename(previous_prayer.slug, len(paginated[previous_prayer.slug]))
 
             if page_index < page_count:
-                next_href = f"#page-{page_index + 1}"
+                next_href = prayer_page_filename(prayer.slug, page_index + 1)
             elif index + 1 < len(ordered):
                 next_prayer = ordered[index + 1]
                 next_href = prayer_page_filename(next_prayer.slug, 1)
 
             nav = page_nav_html(previous_href, next_href, page_index, page_count)
-            rendered_pages.append(
-                reader_page_html(prayer.title, page_body, updated, nav, liturgical_day, page_index)
+            page_note = f"Trang {page_index}/{page_count}" if page_index > 1 else ""
+            (SITE_DIR / prayer_page_filename(prayer.slug, page_index)).write_text(
+                page_shell(
+                    prayer.title,
+                    page_body,
+                    updated,
+                    nav,
+                    liturgical_day,
+                    show_metadata=page_index == 1,
+                    show_title=page_index == 1,
+                    page_note=page_note,
+                ),
+                encoding="utf-8",
             )
-        (SITE_DIR / prayer_page_filename(prayer.slug, 1)).write_text(
-            page_shell(
-                prayer.title,
-                "\n".join(rendered_pages),
-                updated,
-                "",
-                liturgical_day=None,
-                show_metadata=False,
-                show_title=False,
-            ),
-            encoding="utf-8",
-        )
 
 
 def write_error_page(message: str) -> None:

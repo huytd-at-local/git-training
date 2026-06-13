@@ -22,16 +22,6 @@ main {
   margin: 0 auto;
 }
 
-.reader-page {
-  margin: 0 0 42px 0;
-  padding: 0 0 28px 0;
-  border-bottom: 2px solid #999;
-}
-
-.reader-page:last-child {
-  border-bottom: 0;
-}
-
 h1 {
   margin: 0 0 12px 0;
   text-align: center;
