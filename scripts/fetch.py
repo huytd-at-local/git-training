@@ -68,9 +68,11 @@ PRAYERS = [
     ("Kinh Tối", "kinh-toi"),
 ]
 
-PAGE_TARGET_UNITS = 20
+PAGE_TARGET_UNITS = 18
 FIRST_PAGE_TARGET_UNITS = 16
 CHARS_PER_READING_LINE = 30
+MIN_UNITS_BEFORE_HEADING_BREAK = 7
+MIN_PAGE_UNITS = 7
 
 LABEL_PATTERNS = [
     r"^ĐC\b",
@@ -1218,13 +1220,41 @@ def block_units(block_html: str) -> int:
     text = soup.get_text(" ", strip=True)
     br_count = len(soup.find_all("br"))
     heading_count = len(soup.find_all(["h2", "h3"]))
-    return max(1, text_units(text) + br_count + heading_count)
+    explicit_lines = br_count + 1 if text else 0
+    return max(1, max(text_units(text), explicit_lines) + heading_count)
 
 
 def is_heading_block(block_html: str) -> bool:
     soup = BeautifulSoup(block_html, "lxml")
     first = soup.find(["h2", "h3"])
     return bool(first and first.get_text(strip=True))
+
+
+def page_units(blocks: list[str]) -> int:
+    return sum(block_units(block) for block in blocks)
+
+
+def rebalance_short_pages(pages: list[list[str]]) -> list[list[str]]:
+    index = 1
+    while index < len(pages):
+        if page_units(pages[index]) >= MIN_PAGE_UNITS:
+            index += 1
+            continue
+
+        if index == len(pages) - 1:
+            pages[index - 1].extend(pages[index])
+            del pages[index]
+            continue
+
+        combined_with_next = page_units(pages[index]) + page_units(pages[index + 1])
+        if combined_with_next <= PAGE_TARGET_UNITS + MIN_PAGE_UNITS:
+            pages[index].extend(pages[index + 1])
+            del pages[index + 1]
+            index += 1
+        else:
+            pages[index - 1].extend(pages[index])
+            del pages[index]
+    return pages
 
 
 def html_blocks(fragment: str) -> list[str]:
@@ -1296,7 +1326,7 @@ def paginate_html(fragment: str) -> list[str]:
     for block in blocks:
         units = block_units(block)
         target = FIRST_PAGE_TARGET_UNITS if not pages else PAGE_TARGET_UNITS
-        if current and is_heading_block(block):
+        if current and is_heading_block(block) and current_units >= MIN_UNITS_BEFORE_HEADING_BREAK:
             pages.append(current)
             current = []
             current_units = 0
@@ -1312,6 +1342,7 @@ def paginate_html(fragment: str) -> list[str]:
     if current:
         pages.append(current)
 
+    pages = rebalance_short_pages(pages)
     return ["\n".join(page) for page in pages]
 
 
