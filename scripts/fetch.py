@@ -1,0 +1,1272 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import html
+import json
+import logging
+import re
+import sys
+import unicodedata
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Iterable
+
+import requests
+from bs4 import BeautifulSoup, Comment, NavigableString, Tag
+from zoneinfo import ZoneInfo
+
+
+SOURCE_URL = "https://ktcgkpv.org/readings/prayer"
+TIMEOUT_SECONDS = 30
+ROOT = Path(__file__).resolve().parents[1]
+SITE_DIR = ROOT / "site"
+CACHE_DIR = ROOT / ".cache"
+BUILD_DIR = ROOT / "build"
+VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
+
+USER_AGENT = (
+    "kindle-gkpv-static/1.0 "
+    "(GitHub Pages daily static mirror; contact: repository maintainer)"
+)
+
+GLORY_LINES = [
+    "Vinh danh Chúa Cha và Chúa Con,",
+    "cùng vinh danh Thánh Thần Thiên Chúa,",
+    "tự muôn đời và chính hiện nay",
+    "luôn mãi đến thiên thu vạn đại. A-men.",
+]
+
+API_ORDER = [
+    "hymn",
+    "psalm1",
+    "canticle",
+    "psalm2",
+    "psalm3",
+    "reading",
+    "responsory",
+    "readingleading",
+    "reading1",
+    "responsory1",
+    "reading2",
+    "responsory2",
+    "tedeum",
+    "gospel",
+    "gospel_canticle",
+    "intercession",
+    "prayer",
+]
+
+PRAYERS = [
+    ("Kinh Sách", "kinh-sach"),
+    ("Kinh Sáng", "kinh-sang"),
+    ("Kinh Trưa - Giờ Ba", "kinh-trua-gio-ba"),
+    ("Kinh Trưa - Giờ Sáu", "kinh-trua-gio-sau"),
+    ("Kinh Trưa - Giờ Chín", "kinh-trua-gio-chin"),
+    ("Kinh Chiều", "kinh-chieu"),
+    ("Kinh Tối", "kinh-toi"),
+]
+
+LABEL_PATTERNS = [
+    r"^ĐC\b",
+    r"^Chủ sự\b",
+    r"^Cộng đoàn\b",
+    r"^Thánh thi\b",
+    r"^Ca vịnh\b",
+    r"^Tv\s*\d+",
+    r"^Lời Chúa\b",
+    r"^Xướng đáp\b",
+    r"^Lời nguyện\b",
+    r"^Kết thúc\b",
+    r"^Tin Mừng\b",
+    r"^Bài đọc\b",
+]
+
+BLOCK_TAGS = {
+    "address",
+    "article",
+    "aside",
+    "blockquote",
+    "dd",
+    "details",
+    "dialog",
+    "div",
+    "dl",
+    "dt",
+    "fieldset",
+    "figcaption",
+    "figure",
+    "footer",
+    "form",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "header",
+    "hr",
+    "li",
+    "main",
+    "nav",
+    "ol",
+    "p",
+    "pre",
+    "section",
+    "table",
+    "tbody",
+    "td",
+    "tfoot",
+    "th",
+    "thead",
+    "tr",
+    "ul",
+}
+
+DROP_TAGS = {
+    "audio",
+    "button",
+    "canvas",
+    "footer",
+    "form",
+    "iframe",
+    "input",
+    "nav",
+    "noscript",
+    "script",
+    "select",
+    "style",
+    "svg",
+    "video",
+}
+
+DROP_ATTR_RE = re.compile(
+    r"(menu|navbar|nav-|header|footer|audio|player|podcast|app|download|share|"
+    r"social|advert|ads|modal|drawer|sidebar|toolbar|breadcrumb)",
+    re.I,
+)
+
+
+@dataclass(frozen=True)
+class Prayer:
+    title: str
+    slug: str
+    body_html: str
+
+
+@dataclass(frozen=True)
+class LiturgicalDay:
+    title: str
+    rank: str
+    selector: str
+    date_title: str = ""
+
+
+def setup_logging(verbose: bool) -> None:
+    level = logging.DEBUG if verbose else logging.INFO
+    logging.basicConfig(format="%(levelname)s: %(message)s", level=level)
+
+
+def normalize_key(value: str) -> str:
+    value = unicodedata.normalize("NFD", value)
+    value = "".join(ch for ch in value if unicodedata.category(ch) != "Mn")
+    value = value.replace("đ", "d").replace("Đ", "D")
+    value = re.sub(r"[^a-zA-Z0-9]+", " ", value)
+    return re.sub(r"\s+", " ", value).strip().lower()
+
+
+def fetch_source(session: requests.Session, url: str) -> str:
+    logging.info("Fetching %s", url)
+    response = session.get(
+        url,
+        headers={"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml"},
+        timeout=TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    if response.encoding is None:
+        response.encoding = "utf-8"
+    return response.text
+
+
+def fetch_prayer_json(
+    session: requests.Session,
+    date: datetime,
+    active_prayer: str,
+    daytime_hour: str | None = None,
+) -> dict:
+    data = {
+        "day": date.day,
+        "month": date.month,
+        "year": date.year,
+        "seldate": date.strftime("%a %b %d %Y 00:00:00 GMT+0700 (Indochina Time)"),
+        "active_prayer": active_prayer,
+        "daytime_hour": daytime_hour or "",
+        "feast_cd": "",
+    }
+    logging.info("Fetching AJAX prayer active_prayer=%s daytime_hour=%s", active_prayer, daytime_hour)
+    response = session.post(
+        SOURCE_URL,
+        data=data,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+            "Referer": SOURCE_URL,
+        },
+        timeout=TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not payload.get("success"):
+        raise ValueError(f"AJAX prayer request failed: {payload.get('msg')}")
+    return payload["data"]
+
+
+def save_debug_source(source: str) -> None:
+    for directory in (CACHE_DIR, BUILD_DIR):
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / "source.html"
+        path.write_text(source, encoding="utf-8")
+        logging.info("Saved raw source to %s", path.relative_to(ROOT))
+
+
+def append_debug(lines: list[str]) -> None:
+    BUILD_DIR.mkdir(parents=True, exist_ok=True)
+    (BUILD_DIR / "debug.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def should_drop(tag: Tag) -> bool:
+    if tag.attrs is None:
+        return True
+    if tag.name in DROP_TAGS:
+        return True
+    attrs = " ".join(
+        str(value)
+        for key, value in tag.attrs.items()
+        if key in {"id", "class", "role", "aria-label"}
+    )
+    return bool(attrs and DROP_ATTR_RE.search(attrs))
+
+
+def clean_soup(source: str) -> BeautifulSoup:
+    soup = BeautifulSoup(source, "lxml")
+    for tag in list(soup.find_all(True)):
+        if should_drop(tag):
+            tag.decompose()
+    return soup
+
+
+def fragment_soup(fragment: str | None) -> BeautifulSoup:
+    return BeautifulSoup(f"<div>{fragment or ''}</div>", "lxml")
+
+
+def set_inner_html(tag: Tag, fragment: str | None) -> None:
+    tag.clear()
+    soup = fragment_soup(fragment)
+    wrapper = soup.find("div")
+    if not wrapper:
+        return
+    for child in list(wrapper.contents):
+        tag.append(child)
+
+
+def resolve_payload_value(payload_root: dict, class_name: str):
+    match = re.match(r"^(?P<root>[a-zA-Z_]+)\[(?P<key>[^\]]+)\](?:\[(?P<field>[^\]]+)\])?$", class_name)
+    if not match:
+        return None
+    root_name = match.group("root")
+    key = match.group("key")
+    field = match.group("field")
+    root_value = ci_get(payload_root, root_name)
+    if isinstance(root_value, dict):
+        value = ci_get(root_value, key)
+    else:
+        value = ci_get(payload_root, key)
+    if field and isinstance(value, dict):
+        value = ci_get(value, field)
+    return value
+
+
+def fill_payload_placeholders(container: Tag, prayer_data: dict, root_key: str) -> None:
+    root = prayer_data.get(root_key)
+    if not isinstance(root, dict):
+        raise ValueError(f"Missing {root_key} data")
+    payload_root = dict(root)
+    if isinstance(prayer_data.get("first_invitatory"), dict):
+        payload_root["first_invitatory"] = prayer_data["first_invitatory"]
+
+    for tag in list(container.find_all(True)):
+        classes = tag.get("class", [])
+        if not isinstance(classes, list):
+            continue
+        for class_name in classes:
+            value = resolve_payload_value(payload_root, class_name)
+            if value is None:
+                continue
+            set_inner_html(tag, str(value))
+            break
+
+
+def unwrap_preserving_children(tag: Tag) -> None:
+    tag.unwrap()
+
+
+def sanitize_render_dom(container: Tag) -> None:
+    for tag in list(container.select("script, style, ul.dropdown-menu, button, select, audio, video, iframe, canvas, svg")):
+        tag.decompose()
+
+    for tag in list(container.select(".content-selection")):
+        unwrap_preserving_children(tag)
+
+    for icon in list(container.select("i.fa")):
+        icon.decompose()
+
+    for tag in list(container.find_all(True)):
+        if tag.name == "i":
+            tag.name = "em"
+        if tag.name == "b":
+            tag.name = "strong"
+        if tag.name == "h4":
+            tag.name = "h2"
+
+        classes = tag.get("class", [])
+        if not isinstance(classes, list):
+            classes = []
+        style = str(tag.get("style", ""))
+        if "font-style" in style and "italic" in style:
+            classes.append("note")
+        if any(cls in {"epitomize", "leading"} for cls in classes):
+            classes.append("note")
+        if classes:
+            kept = []
+            for cls in classes:
+                if cls in {"note", "pre", "body", "antiphon", "glory", "division-header", "title", "indexing", "section", "right-indexing", "small-text"}:
+                    kept.append(cls)
+            if kept:
+                tag["class"] = sorted(set(kept), key=kept.index)
+            elif tag.has_attr("class"):
+                del tag["class"]
+        for attr in list(tag.attrs):
+            if attr not in {"class", "href"}:
+                del tag[attr]
+
+    for tag in list(container.find_all(True)):
+        if tag.name in {"p", "div", "h2", "h3", "span"} and not tag.get_text(strip=True) and not tag.find(["br", "sup"]):
+            tag.decompose()
+
+
+def post_process_render_dom(container: Tag) -> None:
+    for pre in container.select(".pre"):
+        text = pre.get_text("", strip=True)
+        if text and not text.endswith(":"):
+            pre.clear()
+            pre.append(f"{text}:")
+        next_sibling = pre.next_sibling
+        if isinstance(next_sibling, Tag) and "body" in next_sibling.get("class", []):
+            pre.insert_after(NavigableString(" "))
+
+    for sup in container.find_all("sup"):
+        next_sibling = sup.next_sibling
+        if isinstance(next_sibling, Tag) and next_sibling.name == "span":
+            sup.insert_after(NavigableString(" "))
+        elif isinstance(next_sibling, NavigableString) and str(next_sibling) and not str(next_sibling).startswith((" ", "\n")):
+            next_sibling.replace_with(NavigableString(" " + str(next_sibling)))
+
+    soup = BeautifulSoup("", "lxml")
+    for sup in list(container.find_all("sup")):
+        if sup.find_parent(class_="verse-line"):
+            continue
+        if not sup.get_text(strip=True).isdigit():
+            continue
+        next_node = sup.next_sibling
+        while isinstance(next_node, NavigableString) and not str(next_node).strip():
+            next_node = next_node.next_sibling
+        if not isinstance(next_node, Tag) or next_node.name != "span":
+            continue
+        verse = soup.new_tag("span")
+        verse["class"] = ["verse-line"]
+        sup.insert_before(verse)
+        verse.append(sup.extract())
+        if isinstance(verse.next_sibling, NavigableString) and not str(verse.next_sibling).strip():
+            verse.append(verse.next_sibling.extract())
+        if verse.next_sibling is next_node:
+            verse.append(next_node.extract())
+
+    def remove_br_between_verse_blocks() -> None:
+        for br in list(container.find_all("br")):
+            previous = br.previous_sibling
+            while isinstance(previous, NavigableString) and not str(previous).strip():
+                previous = previous.previous_sibling
+            next_node = br.next_sibling
+            while isinstance(next_node, NavigableString) and not str(next_node).strip():
+                next_node = next_node.next_sibling
+            if (
+                isinstance(previous, Tag)
+                and isinstance(next_node, Tag)
+                and any(cls in previous.get("class", []) for cls in ("verse-line", "verse-continuation"))
+                and any(cls in next_node.get("class", []) for cls in ("verse-line", "verse-continuation"))
+            ):
+                br.decompose()
+
+    remove_br_between_verse_blocks()
+
+    for span in container.find_all("span"):
+        if span.get("class") or span.find_parent(class_="verse-line"):
+            continue
+        parent = span.parent
+        if not isinstance(parent, Tag) or parent.name != "p":
+            continue
+        text = span.get_text(" ", strip=True)
+        if not text:
+            continue
+        has_numbered_sibling = any(
+            isinstance(sibling, Tag) and "verse-line" in sibling.get("class", [])
+            for sibling in parent.children
+        )
+        previous = parent.find_previous_sibling("p")
+        previous_numbered = isinstance(previous, Tag) and previous.select_one(".verse-line")
+        if has_numbered_sibling or previous_numbered:
+            span["class"] = ["verse-continuation"]
+
+    remove_br_between_verse_blocks()
+
+def html_children(container: Tag) -> str:
+    return "\n".join(str(child) for child in container.contents if not isinstance(child, Comment)).strip()
+
+
+def render_intro_html(source: str, prayer_data: dict, root_key: str) -> str:
+    soup = BeautifulSoup(source, "lxml")
+    wrapper = BeautifulSoup("<div></div>", "lxml").div
+    heading = soup.new_tag("h2")
+    heading.string = "Giáo đầu"
+    wrapper.append(heading)
+
+    if root_key in {"office", "morning"} and isinstance(prayer_data.get("first_invitatory"), dict):
+        intro = soup.find(id="firstInvitatory")
+        if not isinstance(intro, Tag):
+            raise ValueError("Could not find #firstInvitatory in source HTML")
+        intro = BeautifulSoup(str(intro), "lxml").find(id="firstInvitatory")
+        if not isinstance(intro, Tag):
+            raise ValueError("Could not clone #firstInvitatory")
+        intro.attrs = {}
+        for tag in list(intro.select("#inviPsalm, .poem.hidden")):
+            tag.decompose()
+        for poem in list(intro.select(".poem")):
+            if root_key == "office" or poem.get("id") != "psalm94":
+                poem.decompose()
+        psalm94 = intro.find(id="psalm94")
+        if root_key == "morning" and isinstance(psalm94, Tag) and not psalm94.select_one(".indexing"):
+            heading_soup = BeautifulSoup('<p class="indexing">Tv 94 (95)</p>', "lxml")
+            heading = heading_soup.find("p")
+            if isinstance(heading, Tag):
+                psalm94.insert(0, heading)
+        fill_payload_placeholders(intro, prayer_data, root_key)
+        sanitize_render_dom(intro)
+        wrapper.append(intro)
+    else:
+        intro = soup.find(id="commonInvitatory")
+        if not isinstance(intro, Tag):
+            raise ValueError("Could not find #commonInvitatory in source HTML")
+        intro = BeautifulSoup(str(intro), "lxml").find(id="commonInvitatory")
+        if not isinstance(intro, Tag):
+            raise ValueError("Could not clone #commonInvitatory")
+        intro.attrs = {}
+        sanitize_render_dom(intro)
+        wrapper.append(intro)
+
+    post_process_render_dom(wrapper)
+    return html_children(wrapper)
+
+
+def render_lay_ending_html(source: str) -> str:
+    soup = BeautifulSoup(source, "lxml")
+    ending = soup.find(id="ending2")
+    if not isinstance(ending, Tag):
+        raise ValueError("Could not find #ending2 in source HTML")
+    wrapper = BeautifulSoup("<div></div>", "lxml").div
+    heading = soup.new_tag("h2")
+    heading["class"] = ["division-header"]
+    heading.string = "Kết thúc"
+    wrapper.append(heading)
+    ending = BeautifulSoup(str(ending), "lxml").find(id="ending2")
+    if not isinstance(ending, Tag):
+        raise ValueError("Could not clone #ending2")
+    ending.attrs = {}
+    for tag in list(ending.select(".ending-opt")):
+        tag.decompose()
+    sanitize_render_dom(ending)
+    wrapper.append(ending)
+    post_process_render_dom(wrapper)
+    return html_children(wrapper)
+
+
+def render_dom_prayer(title: str, slug: str, source: str, payload: dict, root_key: str, tab_id: str) -> Prayer:
+    prayer_items = payload.get("prayer")
+    if isinstance(prayer_items, list):
+        if not prayer_items:
+            raise ValueError(f"No prayer data returned for {title}")
+        prayer_data = prayer_items[0]
+    elif isinstance(prayer_items, dict):
+        prayer_data = prayer_items
+    else:
+        raise ValueError(f"Unexpected prayer data for {title}: {type(prayer_items).__name__}")
+
+    soup = BeautifulSoup(source, "lxml")
+    tab = soup.find(id=tab_id)
+    if not isinstance(tab, Tag):
+        raise ValueError(f"Could not find #{tab_id} in source HTML")
+    normal = tab.select_one(".normal-content")
+    if not isinstance(normal, Tag):
+        raise ValueError(f"Could not find #{tab_id} .normal-content in source HTML")
+
+    fill_payload_placeholders(normal, prayer_data, root_key)
+    root = prayer_data.get(root_key, {})
+    if isinstance(root, dict) and ci_get(root, "feast_hide"):
+        for tag in list(normal.select(".feast-hide")):
+            tag.decompose()
+    sanitize_render_dom(normal)
+    post_process_render_dom(normal)
+    body_parts = [render_intro_html(source, prayer_data, root_key), html_children(normal)]
+    if root_key in {"morning", "evening"}:
+        body_parts.append(render_lay_ending_html(source))
+    body = "\n".join(part for part in body_parts if part)
+    return Prayer(title, slug, body)
+
+
+def extract_liturgical_day(payloads: list[dict]) -> LiturgicalDay | None:
+    for payload in payloads:
+        info = payload.get("date_info")
+        if not isinstance(info, dict):
+            continue
+        main_title = str(info.get("main_title") or "").strip()
+        sub_title = str(info.get("sub_title") or "").strip()
+        daily_title = str(info.get("daily_title") or "").strip()
+        title = sub_title or main_title or daily_title
+        date_title = main_title if sub_title and main_title != sub_title else daily_title
+        rank = str(info.get("rank") or info.get("type") or "").strip()
+        if title or rank:
+            selector = "payload.date_info.sub_title/main_title/rank" if sub_title else "payload.date_info.main_title/rank"
+            return LiturgicalDay(title=title, rank=rank, selector=selector, date_title=date_title)
+        feasts = payload.get("feasts")
+        if isinstance(feasts, list) and feasts:
+            title = str(feasts[0].get("text") or "").strip()
+            if title:
+                return LiturgicalDay(title=title, rank=rank, selector="payload.feasts[0].text")
+    return None
+
+
+class LineCollector:
+    def __init__(self) -> None:
+        self.lines: list[str] = []
+        self.current = ""
+
+    def push_text(self, text: str) -> None:
+        text = text.replace("\xa0", " ").replace("\r", "")
+        parts = text.split("\n")
+        for index, part in enumerate(parts):
+            collapsed = re.sub(r"[ \t\f\v]+", " ", part)
+            if collapsed:
+                if self.current and not self.current.endswith((" ", "(", "“", "‘")):
+                    self.current += " "
+                self.current += collapsed.strip()
+            if index < len(parts) - 1:
+                self.break_line()
+
+    def break_line(self) -> None:
+        line = self.current.strip()
+        if line:
+            self.lines.append(line)
+        self.current = ""
+
+    def blank_line(self) -> None:
+        self.break_line()
+        if self.lines and self.lines[-1] != "":
+            self.lines.append("")
+
+    def finish(self) -> list[str]:
+        self.break_line()
+        return trim_blank_lines(self.lines)
+
+
+def collect_lines(node: Tag | BeautifulSoup) -> list[str]:
+    collector = LineCollector()
+
+    def walk(child: Tag | NavigableString) -> None:
+        if isinstance(child, Comment):
+            return
+        if isinstance(child, NavigableString):
+            collector.push_text(str(child))
+            return
+        if not isinstance(child, Tag):
+            return
+        if child.name == "br":
+            collector.break_line()
+            return
+        if child.name == "hr":
+            collector.blank_line()
+            return
+
+        is_block = child.name in BLOCK_TAGS
+        if is_block:
+            collector.break_line()
+
+        for inner in child.children:
+            walk(inner)
+
+        if child.name in {"h1", "h2", "h3", "h4", "p", "li", "div", "section", "article", "tr"}:
+            collector.break_line()
+        if child.name in {"h1", "h2", "h3", "h4", "section", "article", "blockquote", "ul", "ol"}:
+            collector.blank_line()
+
+    walk(node)
+    return collector.finish()
+
+
+def html_fragment_lines(fragment: str | None) -> list[str]:
+    if not fragment:
+        return []
+    soup = BeautifulSoup(f"<div>{fragment}</div>", "lxml")
+    return collect_lines(soup)
+
+
+def add_html(lines: list[str], label: str | None, fragment: str | None) -> None:
+    fragment_lines = html_fragment_lines(fragment)
+    if not fragment_lines:
+        return
+    if label:
+        lines.extend(["", label])
+    lines.extend(fragment_lines)
+
+
+def ci_get(data: dict, key: str, default=None):
+    for item_key, value in data.items():
+        if item_key.lower() == key.lower():
+            return value
+    return default
+
+
+def render_antiphon(lines: list[str], data: dict, key: str) -> None:
+    add_html(lines, "ĐC", ci_get(data, key))
+
+
+def render_psalm(lines: list[str], root: dict, key: str) -> None:
+    psalm = ci_get(root, key)
+    if not isinstance(psalm, dict):
+        return
+
+    key_l = key.lower()
+    number = re.sub(r"\D+", "", key)
+    antiphon_key = f"antiphon{number}" if number else "antiphon"
+    if key_l == "canticle" and ci_get(root, "antiphon2"):
+        antiphon_key = "antiphon2"
+    if key_l == "psalm2" and ci_get(root, "canticle") and ci_get(root, "antiphon3"):
+        antiphon_key = "antiphon3"
+    render_antiphon(lines, root, antiphon_key)
+
+    heading_parts = [
+        ci_get(psalm, "INDEXING"),
+        ci_get(psalm, "TITLE"),
+        ci_get(psalm, "SECTION"),
+    ]
+    heading = " - ".join(str(part) for part in heading_parts if part)
+    if heading:
+        lines.extend(["", heading])
+    add_html(lines, None, ci_get(psalm, "EPITOMIZE"))
+    add_html(lines, None, ci_get(psalm, "CONTENT"))
+    lines.extend(GLORY_LINES)
+    render_antiphon(lines, root, antiphon_key)
+
+
+def render_reading_block(lines: list[str], label: str, data: dict) -> None:
+    lines.extend(["", label])
+    heading_parts = [
+        ci_get(data, "INDEXING"),
+        ci_get(data, "TITLE"),
+        ci_get(data, "SECTION"),
+    ]
+    heading = " - ".join(str(part) for part in heading_parts if part)
+    if heading:
+        lines.append(heading)
+    add_html(lines, None, ci_get(data, "EPITOMIZE"))
+    add_html(lines, None, ci_get(data, "LEAD"))
+    add_html(lines, None, ci_get(data, "CONTENT"))
+
+
+def render_structured_value(lines: list[str], root: dict, key: str, value) -> None:
+    key_l = key.lower()
+    labels = {
+        "hymn": "Thánh thi",
+        "canticle": "Thánh ca",
+        "reading": "Lời Chúa",
+        "responsory": "Xướng đáp",
+        "readingleading": "Dẫn vào bài đọc",
+        "reading1": "Bài đọc 1",
+        "responsory1": "Xướng đáp 1",
+        "reading2": "Bài đọc 2",
+        "responsory2": "Xướng đáp 2",
+        "tedeum": "Thánh thi Lạy Thiên Chúa",
+        "gospel": "Tin Mừng",
+        "gospel_canticle": "Thánh ca Tin Mừng",
+        "intercession": "Lời cầu",
+        "prayer": "Lời nguyện",
+    }
+
+    if key_l.startswith("psalm"):
+        render_psalm(lines, root, key)
+        return
+    if isinstance(value, str):
+        add_html(lines, labels.get(key_l, key), value)
+        return
+    if isinstance(value, dict):
+        if key_l in {"reading", "reading1", "reading2", "gospel"}:
+            render_reading_block(lines, labels.get(key_l, key), value)
+            return
+        if key_l in {"canticle", "gospel_canticle"}:
+            render_psalm(lines, root, key)
+            if ci_get(value, "CONTENT") and not any(
+                ci_get(root, antiphon_key) for antiphon_key in ("antiphon", "antiphon2", "antiphon4")
+            ):
+                render_reading_block(lines, labels.get(key_l, key), value)
+            return
+        render_data_dict(lines, value)
+
+
+def ordered_items(data: dict):
+    used: set[str] = set()
+    lower_map = {key.lower(): key for key in data}
+    for wanted in API_ORDER:
+        if wanted in lower_map:
+            key = lower_map[wanted]
+            used.add(key)
+            yield key, data[key]
+    for key, value in data.items():
+        if key not in used and not key.lower().startswith("antiphon") and key.lower() not in {
+            "number",
+            "indexing",
+            "section",
+            "title",
+            "epitomize",
+            "content",
+            "lead",
+            "glory",
+            "feast_hide",
+        }:
+            yield key, value
+
+
+def render_data_dict(lines: list[str], data: dict) -> None:
+    for key, value in ordered_items(data):
+        render_structured_value(lines, data, key, value)
+
+
+def render_api_prayer(title: str, slug: str, payload: dict, root_key: str) -> Prayer:
+    prayer_items = payload.get("prayer")
+    if isinstance(prayer_items, list):
+        if not prayer_items:
+            raise ValueError(f"No prayer data returned for {title}")
+        prayer_data = prayer_items[0]
+    elif isinstance(prayer_items, dict):
+        prayer_data = prayer_items
+    else:
+        raise ValueError(f"Unexpected prayer data for {title}: {type(prayer_items).__name__}")
+
+    root = prayer_data.get(root_key)
+    if not isinstance(root, dict):
+        raise ValueError(f"Missing {root_key} data for {title}")
+
+    lines: list[str] = []
+    first_invitatory = prayer_data.get("first_invitatory")
+    if isinstance(first_invitatory, dict):
+        lines.extend(
+            [
+                "",
+                "Giáo đầu",
+                "Chủ sự",
+                "Lạy Chúa Trời, xin mở miệng con,",
+                "Cộng đoàn",
+                "cho con cất tiếng ngợi khen Ngài.",
+            ]
+        )
+        add_html(lines, "ĐC", first_invitatory.get("antiphon"))
+
+    render_data_dict(lines, root)
+    return Prayer(title, slug, render_line_groups(trim_blank_lines(lines)))
+
+
+def filter_night_dom(night: Tag, payload: dict) -> Tag:
+    night_payload = payload.get("prayer", {}).get("night", {})
+    psalm_code = str(night_payload.get("code") or "")
+    prayer_code = str(night_payload.get("prayer_cd") or "")
+    reading_code = str(night_payload.get("reading_cd") or "")
+    season = payload.get("date_info", {}).get("season")
+    today = payload.get("date_info", {}).get("today", {})
+    try:
+        day_number = int(today.get("date") or 0) if isinstance(today, dict) else 0
+    except (TypeError, ValueError):
+        day_number = 0
+
+    for tag in list(night.select("script, style, .dropdown-menu, .content-selection, .hymnSelection, .exclamationSelection")):
+        tag.decompose()
+
+    for tag in list(night.select(".day-option")):
+        classes = set(tag.get("class", []))
+        parent_division = tag.find_parent(class_="division")
+        parent_classes = set(parent_division.get("class", [])) if isinstance(parent_division, Tag) else set()
+        if "prayer" in parent_classes:
+            keep = prayer_code and prayer_code in classes
+        elif "reading" in parent_classes:
+            keep = reading_code and reading_code in classes
+        else:
+            keep = psalm_code and psalm_code in classes
+        if not keep:
+            tag.decompose()
+
+    for tag in list(night.select(".christmas, .easter")):
+        classes = set(tag.get("class", []))
+        if not season or season not in classes:
+            tag.decompose()
+
+    if season == "easter":
+        for tag in list(night.select(".not-easter")):
+            tag.decompose()
+    else:
+        for tag in list(night.select(".only-easter")):
+            tag.decompose()
+
+    if season in {"christmas", "easter"}:
+        for tag in list(night.select(".exclamation.division > .body.normal")):
+            tag.decompose()
+    else:
+        exclamation_count = len(night.select(".exclamation.division > .body.normal"))
+        selected_exclamation = f"exclamation{(day_number % exclamation_count) + 1}" if exclamation_count else "exclamation1"
+        for tag in list(night.select(".exclamation.division > .body.normal")):
+            classes = set(tag.get("class", []))
+            if selected_exclamation not in classes:
+                tag.decompose()
+
+    for selector in (".hymn2",):
+        for tag in list(night.select(selector)):
+            tag.decompose()
+
+    return night
+
+
+def render_night_prayer(title: str, slug: str, source: str, payload: dict) -> Prayer:
+    soup = BeautifulSoup(source, "lxml")
+    night = soup.find(id="nightPrayer")
+    if not isinstance(night, Tag):
+        raise ValueError("Could not find #nightPrayer in source HTML")
+    night = filter_night_dom(night, payload)
+    sanitize_render_dom(night)
+    post_process_render_dom(night)
+    intro = render_intro_html(source, {"night": {}}, "night")
+    return Prayer(title, slug, intro + "\n" + html_children(night))
+
+
+def write_payload_debug(name: str, payload: dict) -> None:
+    BUILD_DIR.mkdir(parents=True, exist_ok=True)
+    path = BUILD_DIR / f"{name}.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def build_prayers_from_api(session: requests.Session, source: str, date: datetime) -> tuple[list[Prayer], LiturgicalDay | None, list[str]]:
+    jobs = [
+        ("Kinh Sách", "kinh-sach", "officeReading", None, "office", "officeReading"),
+        ("Kinh Sáng", "kinh-sang", "morningPrayer", None, "morning", "morningPrayer"),
+        ("Kinh Trưa - Giờ Ba", "kinh-trua-gio-ba", "daytimePrayer", "h3", "daytime", "daytimePrayer"),
+        ("Kinh Trưa - Giờ Sáu", "kinh-trua-gio-sau", "daytimePrayer", "h6", "daytime", "daytimePrayer"),
+        ("Kinh Trưa - Giờ Chín", "kinh-trua-gio-chin", "daytimePrayer", "h9", "daytime", "daytimePrayer"),
+        ("Kinh Chiều", "kinh-chieu", "eveningPrayer", None, "evening", "eveningPrayer"),
+    ]
+    prayers: list[Prayer] = []
+    payloads: list[dict] = []
+    for title, slug, active_prayer, hour, root_key, tab_id in jobs:
+        payload = fetch_prayer_json(session, date, active_prayer, hour)
+        payloads.append(payload)
+        write_payload_debug(slug, payload)
+        prayers.append(render_dom_prayer(title, slug, source, payload, root_key, tab_id))
+
+    night_payload = fetch_prayer_json(session, date, "nightPrayer")
+    payloads.append(night_payload)
+    write_payload_debug("kinh-toi", night_payload)
+    prayers.append(render_night_prayer("Kinh Tối", "kinh-toi", source, night_payload))
+    liturgical_day = extract_liturgical_day(payloads)
+    debug_lines = [
+        f"URL fetched: {SOURCE_URL}",
+        f"Fetch time Asia/Ho_Chi_Minh: {date.strftime('%Y-%m-%d %H:%M:%S %Z')}",
+        "Main content selector used: #prayerContent tab .normal-content plus #nightPrayer",
+    ]
+    if liturgical_day:
+        debug_lines.append(f"Liturgical-day selector used: {liturgical_day.selector}")
+        debug_lines.append(f"Liturgical-day title: {liturgical_day.title}")
+        debug_lines.append(f"Liturgical-day rank: {liturgical_day.rank}")
+    else:
+        warning = "WARNING: liturgical day not found; tried payload.date_info.main_title/rank and payload.feasts[0].text"
+        logging.warning(warning)
+        debug_lines.append(warning)
+    for prayer in prayers:
+        count = len(BeautifulSoup(prayer.body_html, "lxml").find_all(["h2", "h3", "p", "div"]))
+        debug_lines.append(f"Rendered block count {prayer.slug}: {count}")
+    return prayers, liturgical_day, debug_lines
+
+
+def trim_blank_lines(lines: Iterable[str]) -> list[str]:
+    trimmed: list[str] = []
+    previous_blank = True
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            if not previous_blank:
+                trimmed.append("")
+            previous_blank = True
+            continue
+        trimmed.append(line)
+        previous_blank = False
+    while trimmed and trimmed[-1] == "":
+        trimmed.pop()
+    return trimmed
+
+
+def content_root(soup: BeautifulSoup) -> Tag:
+    for selector in (
+        "main",
+        "article",
+        "#content",
+        ".content",
+        ".reading",
+        ".readings",
+        ".prayer",
+        ".prayers",
+    ):
+        found = soup.select_one(selector)
+        if found and found.get_text(strip=True):
+            logging.info("Using content selector %s", selector)
+            return found
+    logging.warning("No clear content selector found; falling back to <body>")
+    body = soup.body
+    if body is None:
+        raise ValueError("HTML has no body")
+    return body
+
+
+def candidates_for(title: str) -> list[str]:
+    key = normalize_key(title)
+    compact = key.replace(" ", "")
+    words = key.split()
+    return [title, key, compact, "-".join(words), "_".join(words)]
+
+
+def find_explicit_sections(root: Tag) -> list[Prayer] | None:
+    found: list[Prayer] = []
+    used: set[int] = set()
+
+    for title, slug in PRAYERS:
+        title_key = normalize_key(title)
+        title_words = title_key.split()
+        matches: list[Tag] = []
+        for tag in root.find_all(True):
+            if id(tag) in used:
+                continue
+            attrs = " ".join(
+                " ".join(value) if isinstance(value, list) else str(value)
+                for key, value in tag.attrs.items()
+                if key in {"id", "class", "data-title", "aria-label", "name"}
+            )
+            attr_key = normalize_key(attrs)
+            if not attr_key:
+                continue
+            if title_key in attr_key or all(word in attr_key for word in title_words):
+                text_len = len(tag.get_text(" ", strip=True))
+                if text_len > 200:
+                    matches.append(tag)
+        if not matches:
+            return None
+        match = min(matches, key=lambda tag: len(tag.get_text(" ", strip=True)))
+        used.add(id(match))
+        lines = collect_lines(match)
+        if lines:
+            found.append(Prayer(title, slug, render_line_groups(lines)))
+
+    if len(found) == len(PRAYERS):
+        logging.info("Split prayers using explicit DOM attributes")
+        return found
+    return None
+
+
+def marker_match(line: str) -> int | None:
+    key = normalize_key(line)
+    key = re.sub(r"^\d+\s+", "", key)
+    key = re.sub(r"^(?:gio\s+)?", "", key)
+
+    variants = {
+        "kinh sach": 0,
+        "kinh sang": 1,
+        "kinh trua gio ba": 2,
+        "gio ba": 2,
+        "kinh ba": 2,
+        "kinh trua gio sau": 3,
+        "gio sau": 3,
+        "kinh sau": 3,
+        "kinh trua gio chin": 4,
+        "gio chin": 4,
+        "kinh chin": 4,
+        "kinh chieu": 5,
+        "kinh toi": 6,
+    }
+    for marker, index in variants.items():
+        if key == marker or key.startswith(marker + " "):
+            return index
+    return None
+
+
+def split_by_markers(lines: list[str]) -> list[Prayer] | None:
+    starts: dict[int, int] = {}
+    for index, line in enumerate(lines):
+        matched = marker_match(line)
+        if matched is not None and matched not in starts:
+            starts[matched] = index
+
+    if len(starts) < len(PRAYERS):
+        missing = [title for i, (title, _) in enumerate(PRAYERS) if i not in starts]
+        logging.warning("Fallback marker split missing sections: %s", ", ".join(missing))
+        return None
+
+    ordered = sorted(starts.items(), key=lambda item: item[1])
+    prayers: list[Prayer] = []
+    for order_index, (prayer_index, start) in enumerate(ordered):
+        end = ordered[order_index + 1][1] if order_index + 1 < len(ordered) else len(lines)
+        title, slug = PRAYERS[prayer_index]
+        prayers.append(Prayer(title, slug, render_line_groups(trim_blank_lines(lines[start:end]))))
+
+    prayers.sort(key=lambda prayer: [slug for _, slug in PRAYERS].index(prayer.slug))
+    logging.warning("Using fallback split by heading/text markers")
+    return prayers
+
+
+def split_prayers(root: Tag) -> list[Prayer]:
+    explicit = find_explicit_sections(root)
+    if explicit:
+        return explicit
+
+    lines = collect_lines(root)
+    logging.info("Collected %d content lines for fallback parsing", len(lines))
+    by_marker = split_by_markers(lines)
+    if by_marker:
+        return by_marker
+
+    raise ValueError("Could not split source into all 7 prayer sections")
+
+
+def is_label(line: str) -> bool:
+    return any(re.search(pattern, line, re.I) for pattern in LABEL_PATTERNS)
+
+
+def is_heading(line: str) -> bool:
+    key = normalize_key(line)
+    if marker_match(line) is not None:
+        return True
+    if len(line) <= 80 and any(
+        token in key
+        for token in (
+            "thanh thi",
+            "giao dau",
+            "ca vinh",
+            "loi chua",
+            "xuong dap",
+            "loi nguyen",
+            "ket thuc",
+            "tin mung",
+            "bai doc",
+        )
+    ):
+        return True
+    return False
+
+
+def line_to_html(line: str) -> str:
+    escaped = html.escape(line, quote=True)
+    if is_heading(line):
+        return f'<h2>{escaped}</h2>'
+    if is_label(line):
+        return f'<p class="label"><strong>{escaped}</strong></p>'
+    return f"<div>{escaped}</div>"
+
+
+def render_line_groups(lines: list[str]) -> str:
+    parts: list[str] = []
+    stanza: list[str] = []
+
+    def flush_stanza() -> None:
+        nonlocal stanza
+        if stanza:
+            parts.append('<div class="stanza">')
+            parts.extend(line_to_html(line) for line in stanza)
+            parts.append("</div>")
+            stanza = []
+
+    for line in lines:
+        if not line:
+            flush_stanza()
+            continue
+        if is_heading(line) or is_label(line):
+            flush_stanza()
+            parts.append(line_to_html(line))
+        else:
+            stanza.append(line)
+    flush_stanza()
+    return "\n".join(parts)
+
+
+def liturgical_day_html(liturgical_day: LiturgicalDay | None) -> str:
+    if not liturgical_day:
+        return ""
+    title = html.escape(liturgical_day.title)
+    date_title = html.escape(liturgical_day.date_title)
+    rank = html.escape(liturgical_day.rank)
+    date_html = f'  <div class="feast-date">{date_title}</div>\n' if date_title else ""
+    return (
+        '<section class="liturgical-day">\n'
+        f"{date_html}"
+        f'  <div class="feast-title">{title}</div>\n'
+        f'  <div class="feast-rank">{rank}</div>\n'
+        "</section>"
+    )
+
+
+def page_shell(title: str, body: str, updated: str, nav: str, liturgical_day: LiturgicalDay | None = None) -> str:
+    escaped_title = html.escape(title, quote=True)
+    feast_html = liturgical_day_html(liturgical_day)
+    return f"""<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{escaped_title}</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    {nav}
+    <h1>{html.escape(title)}</h1>
+    <p class="updated">Cập nhật: {html.escape(updated)}</p>
+    {feast_html}
+    {body}
+    {nav}
+  </main>
+</body>
+</html>
+"""
+
+
+def nav_html(previous_prayer: Prayer | None, next_prayer: Prayer | None) -> str:
+    prev_link = (
+        f'<a href="{previous_prayer.slug}.html">Giờ trước</a>'
+        if previous_prayer
+        else '<span>Giờ trước</span>'
+    )
+    next_link = (
+        f'<a href="{next_prayer.slug}.html">Giờ sau</a>'
+        if next_prayer
+        else '<span>Giờ sau</span>'
+    )
+    return (
+        '<nav class="page-nav">'
+        '<a href="index.html">Trang chủ</a>'
+        f"{prev_link}"
+        f"{next_link}"
+        "</nav>"
+    )
+
+
+def write_site(prayers: list[Prayer], liturgical_day: LiturgicalDay | None = None) -> None:
+    SITE_DIR.mkdir(parents=True, exist_ok=True)
+    error_page = SITE_DIR / "error.html"
+    if error_page.exists():
+        error_page.unlink()
+    updated = datetime.now(VN_TZ).strftime("%d/%m/%Y %H:%M giờ Việt Nam")
+
+    index_items = "\n".join(
+        f'<li><a href="{slug}.html">{html.escape(title)}</a></li>' for title, slug in PRAYERS
+    )
+    index_body = f"""
+<section class="home-list">
+  <ul>
+    {index_items}
+  </ul>
+</section>
+"""
+    (SITE_DIR / "index.html").write_text(
+        page_shell("Các Giờ Kinh Phụng Vụ", index_body, updated, "", liturgical_day),
+        encoding="utf-8",
+    )
+
+    prayer_by_slug = {prayer.slug: prayer for prayer in prayers}
+    ordered = [prayer_by_slug[slug] for _, slug in PRAYERS]
+    for index, prayer in enumerate(ordered):
+        previous_prayer = ordered[index - 1] if index > 0 else None
+        next_prayer = ordered[index + 1] if index + 1 < len(ordered) else None
+        nav = nav_html(previous_prayer, next_prayer)
+        (SITE_DIR / f"{prayer.slug}.html").write_text(
+            page_shell(prayer.title, prayer.body_html, updated, nav, liturgical_day),
+            encoding="utf-8",
+        )
+
+
+def write_error_page(message: str) -> None:
+    SITE_DIR.mkdir(parents=True, exist_ok=True)
+    escaped = html.escape(message)
+    body = f"""
+<section class="error">
+  <h2>Lỗi parse nội dung</h2>
+  <p>{escaped}</p>
+  <p>Xem log GitHub Actions và file debug <code>.cache/source.html</code> hoặc <code>build/source.html</code>.</p>
+</section>
+"""
+    updated = datetime.now(VN_TZ).strftime("%d/%m/%Y %H:%M giờ Việt Nam")
+    (SITE_DIR / "error.html").write_text(
+        page_shell("Lỗi cập nhật", body, updated, '<nav class="page-nav"><a href="index.html">Trang chủ</a></nav>'),
+        encoding="utf-8",
+    )
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--url", default=SOURCE_URL)
+    parser.add_argument("--verbose", action="store_true")
+    args = parser.parse_args()
+    setup_logging(args.verbose)
+
+    try:
+        session = requests.Session()
+        run_date = datetime.now(VN_TZ)
+        source = fetch_source(session, args.url)
+        save_debug_source(source)
+        if args.url == SOURCE_URL:
+            prayers, liturgical_day, debug_lines = build_prayers_from_api(session, source, run_date)
+        else:
+            logging.warning("Non-default URL supplied; using DOM-only fallback parser")
+            soup = clean_soup(source)
+            root = content_root(soup)
+            prayers = split_prayers(root)
+            liturgical_day = None
+            debug_lines = [
+                f"URL fetched: {args.url}",
+                f"Fetch time Asia/Ho_Chi_Minh: {run_date.strftime('%Y-%m-%d %H:%M:%S %Z')}",
+                "Main content selector used: DOM fallback content_root()",
+                "WARNING: liturgical day not found in DOM fallback; tried payload selectors only on default URL",
+            ]
+        if sorted(prayer.slug for prayer in prayers) != sorted(slug for _, slug in PRAYERS):
+            raise ValueError("Parsed prayers do not match expected fixed list")
+        write_site(prayers, liturgical_day)
+        append_debug(debug_lines)
+        logging.info("Generated %d prayer pages in %s", len(prayers), SITE_DIR.relative_to(ROOT))
+        return 0
+    except Exception as exc:
+        logging.exception("Failed to generate site")
+        write_error_page(str(exc))
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
