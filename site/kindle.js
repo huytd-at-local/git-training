@@ -1,6 +1,6 @@
 (function () {
   var controls = null;
-  var lastTouch = 0;
+  var jumps = [];
 
   function getScrollTop() {
     return (
@@ -11,95 +11,133 @@
     );
   }
 
-  function setScrollTop(value) {
-    if (value < 0) {
-      value = 0;
+  function getOffsetTop(element) {
+    var top = 0;
+    while (element) {
+      top += element.offsetTop || 0;
+      element = element.offsetParent;
     }
-    document.documentElement.scrollTop = value;
-    document.body.scrollTop = value;
-    if (window.scrollTo) {
-      window.scrollTo(0, value);
+    return top;
+  }
+
+  function byTag(root, tagName) {
+    var list = root.getElementsByTagName(tagName);
+    var result = [];
+    var i;
+    for (i = 0; i < list.length; i += 1) {
+      result.push(list[i]);
+    }
+    return result;
+  }
+
+  function sortByPagePosition(a, b) {
+    return getOffsetTop(a) - getOffsetTop(b);
+  }
+
+  function collectBlocks(main) {
+    var blocks = [];
+    blocks = blocks.concat(byTag(main, "h2"));
+    blocks = blocks.concat(byTag(main, "h3"));
+    blocks = blocks.concat(byTag(main, "p"));
+    blocks.sort(sortByPagePosition);
+    return blocks;
+  }
+
+  function addJumpBefore(block, id) {
+    var jump = document.createElement("a");
+    jump.className = "page-jump";
+    jump.id = id;
+    jump.name = id;
+    if (block.parentNode) {
+      block.parentNode.insertBefore(jump, block);
+    }
+    return jump;
+  }
+
+  function buildJumps(main) {
+    var blocks = collectBlocks(main);
+    var lastTop = -9999;
+    var i;
+    var top;
+
+    main.id = main.id || "top";
+    jumps.push(main);
+
+    for (i = 0; i < blocks.length; i += 1) {
+      top = getOffsetTop(blocks[i]);
+      if (top - lastTop >= 520) {
+        jumps.push(addJumpBefore(blocks[i], "page-jump-" + jumps.length));
+        lastTop = top;
+      }
     }
   }
 
-  function getViewHeight() {
-    return (
-      window.innerHeight ||
-      document.documentElement.clientHeight ||
-      document.body.clientHeight ||
-      520
-    );
+  function currentJumpIndex() {
+    var position = getScrollTop() + 60;
+    var index = 0;
+    var i;
+    for (i = 0; i < jumps.length; i += 1) {
+      if (getOffsetTop(jumps[i]) <= position) {
+        index = i;
+      } else {
+        break;
+      }
+    }
+    return index;
+  }
+
+  function setHref(link, jump) {
+    link.href = "#" + jump.id;
   }
 
   function updateControls() {
-    var top;
-    if (!controls) {
+    var index;
+    var topLink;
+    var upLink;
+    var downLink;
+    if (!controls || jumps.length === 0) {
       return;
     }
-    top = getScrollTop() + Math.max(80, Math.floor((getViewHeight() - controls.offsetHeight) / 2));
-    controls.style.top = top + "px";
+
+    index = currentJumpIndex();
+    topLink = controls.getElementsByTagName("a")[0];
+    upLink = controls.getElementsByTagName("a")[1];
+    downLink = controls.getElementsByTagName("a")[2];
+    setHref(topLink, jumps[0]);
+    setHref(upLink, jumps[Math.max(0, index - 1)]);
+    setHref(downLink, jumps[Math.min(jumps.length - 1, index + 1)]);
+    controls.style.top = getScrollTop() + 150 + "px";
   }
 
-  function scrollPage(direction) {
-    var amount = Math.max(420, Math.floor(getViewHeight() * 0.82));
-    setScrollTop(getScrollTop() + direction * amount);
-    updateControls();
-  }
-
-  function scrollTop() {
-    setScrollTop(0);
-    updateControls();
-  }
-
-  function bindButton(button, action) {
-    button.onclick = function () {
-      if (new Date().getTime() - lastTouch < 700) {
-        return false;
-      }
-      action();
-      return false;
-    };
-    button.ontouchstart = function () {
-      lastTouch = new Date().getTime();
-      action();
-      return false;
-    };
+  function makeLink(className, text, label) {
+    var link = document.createElement("a");
+    link.className = className;
+    link.href = "#top";
+    link.setAttribute("aria-label", label);
+    link.appendChild(document.createTextNode(text));
+    link.onclick = updateControls;
+    link.ontouchstart = updateControls;
+    return link;
   }
 
   function addControls() {
-    var top = document.createElement("button");
-    var up = document.createElement("button");
-    var down = document.createElement("button");
+    var main = document.getElementsByTagName("main")[0];
+    if (!main) {
+      return;
+    }
 
+    buildJumps(main);
     controls = document.createElement("div");
     controls.className = "page-controls";
-    top.type = "button";
-    up.type = "button";
-    down.type = "button";
-    top.className = "top-button";
-    top.setAttribute("aria-label", "Trở lại đầu trang");
-    up.setAttribute("aria-label", "Cuộn lên một trang");
-    down.setAttribute("aria-label", "Cuộn xuống một trang");
-    top.appendChild(document.createTextNode("TOP"));
-    up.appendChild(document.createTextNode("▲"));
-    down.appendChild(document.createTextNode("▼"));
-
-    bindButton(top, scrollTop);
-    bindButton(up, function () {
-      scrollPage(-1);
-    });
-    bindButton(down, function () {
-      scrollPage(1);
-    });
-
-    controls.appendChild(top);
-    controls.appendChild(up);
-    controls.appendChild(down);
+    controls.appendChild(makeLink("top-button", "TOP", "Trở lại đầu trang"));
+    controls.appendChild(makeLink("", "▲", "Lùi lại một đoạn"));
+    controls.appendChild(makeLink("", "▼", "Tới đoạn tiếp theo"));
     document.body.appendChild(controls);
+
     updateControls();
     window.onscroll = updateControls;
     window.onresize = updateControls;
-    window.setInterval(updateControls, 800);
+    window.setInterval(updateControls, 700);
   }
 
   if (document.readyState !== "loading") {

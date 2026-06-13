@@ -8,36 +8,36 @@ html {
 
 body {
   margin: 0;
-  padding: 22px 92px 72px 38px;
+  padding: 24px 100px 78px 42px;
   color: #111;
   background: #fff;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 36px;
+  font-size: 40px;
   font-weight: 500;
-  line-height: 1.5;
+  line-height: 1.46;
 }
 
 main {
-  max-width: 18em;
+  max-width: 17em;
   margin: 0 auto;
 }
 
 h1 {
   margin: 0 0 12px 0;
   text-align: center;
-  font-size: 42px;
+  font-size: 46px;
   line-height: 1.25;
 }
 
 h2 {
   margin: 30px 0 14px 0;
-  font-size: 40px;
+  font-size: 44px;
   line-height: 1.3;
 }
 
 h3 {
   margin: 24px 0 12px 0;
-  font-size: 37px;
+  font-size: 41px;
   line-height: 1.35;
 }
 
@@ -48,7 +48,7 @@ a {
 
 .updated {
   margin: 0 0 16px 0;
-  font-size: 28px;
+  font-size: 31px;
   text-align: center;
 }
 
@@ -59,7 +59,7 @@ em,
 }
 
 .note {
-  font-size: 32px;
+  font-size: 35px;
   line-height: 1.45;
   margin: 6px 0 16px 0;
 }
@@ -72,20 +72,20 @@ em,
 }
 
 .feast-date {
-  font-size: 30px;
+  font-size: 33px;
   line-height: 1.35;
   margin: 0 0 4px 0;
 }
 
 .feast-title {
   font-weight: bold;
-  font-size: 37px;
+  font-size: 40px;
   line-height: 1.3;
 }
 
 .feast-rank {
   font-style: italic;
-  font-size: 31px;
+  font-size: 34px;
   line-height: 1.4;
 }
 
@@ -97,9 +97,9 @@ em,
 
 .home-list a {
   display: block;
-  padding: 24px 4px;
+  padding: 26px 4px;
   border-bottom: 2px solid #777;
-  font-size: 40px;
+  font-size: 44px;
   font-weight: bold;
   text-decoration: none;
 }
@@ -108,7 +108,7 @@ em,
   margin: 0 0 18px 0;
   padding: 0 0 14px 0;
   border-bottom: 2px solid #777;
-  font-size: 30px;
+  font-size: 32px;
   line-height: 1.25;
   text-align: center;
 }
@@ -193,34 +193,44 @@ code {
 .page-controls {
   position: absolute;
   right: 8px;
-  top: 140px;
+  top: 150px;
   z-index: 10;
-  width: 72px;
+  width: 76px;
 }
 
-.page-controls button {
+.page-controls a {
   display: block;
-  width: 64px;
-  height: 58px;
+  width: 68px;
+  height: 62px;
   margin: 0 0 10px 0;
   border: 2px solid #111;
   color: #111;
   background: #fff;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 27px;
+  font-size: 29px;
   font-weight: bold;
   line-height: 1;
+  text-align: center;
+  text-decoration: none;
+  padding-top: 14px;
 }
 
 .page-controls .top-button {
-  font-size: 17px;
+  font-size: 18px;
+  padding-top: 19px;
+}
+
+.page-jump {
+  display: block;
+  height: 0;
+  overflow: hidden;
 }
 
 @media (max-width: 520px) {
   body {
-    padding: 18px 86px 72px 34px;
-    font-size: 36px;
-    line-height: 1.48;
+    padding: 20px 94px 78px 38px;
+    font-size: 40px;
+    line-height: 1.44;
   }
 
   main {
@@ -228,11 +238,11 @@ code {
   }
 
   h1 {
-    font-size: 41px;
+    font-size: 45px;
   }
 
   h2 {
-    font-size: 39px;
+    font-size: 43px;
   }
 
   .page-nav a,
