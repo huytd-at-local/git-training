@@ -6,7 +6,6 @@ PYTHON_BIN="${PYTHON:-python3}"
 "$PYTHON_BIN" -m compileall scripts
 test -f site/index.html
 test -f site/style.css
-test -f site/kindle-scroll.js
 
 pages="
 kinh-sach
@@ -23,26 +22,26 @@ for page in $pages; do
   test -f "$file"
   test -s "$file"
   grep -q '<main>' "$file"
-  grep -q 'kindle-scroll.js' "$file"
-  grep -q 'Trang chủ' "$file"
+  grep -q 'Mục lục' "$file"
+  grep -q 'Trang sau' "$file"
   ! grep -q 'Update Required' "$file"
   ! grep -q 'Flash plugin' "$file"
   ! grep -q 'itunes.apple.com' "$file"
   ! grep -q 'play.google.com' "$file"
 done
 
-grep -q 'Ca vịnh' site/kinh-chieu.html
-grep -q 'Ca vịnh' site/kinh-sang.html
-grep -q 'Tv 94 (95)' site/kinh-sang.html
+grep -q 'Ca vịnh' site/kinh-chieu*.html
+grep -q 'Ca vịnh' site/kinh-sang*.html
+grep -q 'Tv 94 (95)' site/kinh-sang*.html
 ! grep -q 'Tv 94 (95)' site/kinh-sach.html
-grep -q 'class="verse-line"' site/kinh-sang.html
-grep -q 'class="verse-line"' site/kinh-toi.html
+grep -q 'class="verse-line"' site/kinh-sang*.html
+grep -q 'class="verse-line"' site/kinh-toi*.html
 grep -q '.antiphon .pre' site/style.css
 ! grep -q 'class="reading-ref"' site/*.html
-grep -q 'Xin Thiên Chúa toàn năng' site/kinh-sang.html
-grep -q 'Xin Thiên Chúa toàn năng' site/kinh-chieu.html
+grep -q 'Xin Thiên Chúa toàn năng' site/kinh-sang*.html
+grep -q 'Xin Thiên Chúa toàn năng' site/kinh-chieu*.html
 ! grep -Eq '<span class="pre">(Chủ sự|Cộng đoàn|ĐC|X|Đ)</span>' site/*.html
-! grep -q 'Ha-lê-lui-a. Ha-lê-lui-a. Ha-lê-lui-a' site/kinh-toi.html
+! grep -q 'Ha-lê-lui-a. Ha-lê-lui-a. Ha-lê-lui-a' site/kinh-toi*.html
 
 if test -f .cache/source.html && grep -Eq '<(em|i)([ >])' .cache/source.html; then
   grep -REq '(<em[ >]|class="[^"]*(italic|note)[^"]*")' site/*.html
@@ -63,7 +62,7 @@ from pathlib import Path
 
 payload = json.loads(Path("build/kinh-toi.json").read_text(encoding="utf-8"))
 season = payload.get("date_info", {}).get("season")
-html = Path("site/kinh-toi.html").read_text(encoding="utf-8")
+html = "\n".join(path.read_text(encoding="utf-8") for path in Path("site").glob("kinh-toi*.html"))
 if season not in {"christmas", "easter"}:
     day = int(payload.get("date_info", {}).get("today", {}).get("date", 0))
     titles = [

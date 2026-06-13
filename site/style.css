@@ -133,6 +133,16 @@ em,
   border-color: #aaa;
 }
 
+.paged-nav a,
+.paged-nav span {
+  min-width: 0;
+  width: 23%;
+}
+
+.paged-nav .page-count {
+  font-weight: bold;
+}
+
 .page-nav:last-child {
   margin: 34px 0 0 0;
   padding: 16px 0 0 0;
@@ -215,5 +225,10 @@ code {
     width: 29%;
     padding-left: 2px;
     padding-right: 2px;
+  }
+
+  .paged-nav a,
+  .paged-nav span {
+    width: 23%;
   }
 }

@@ -68,6 +68,10 @@ PRAYERS = [
     ("Kinh Tối", "kinh-toi"),
 ]
 
+PAGE_TARGET_UNITS = 16
+FIRST_PAGE_TARGET_UNITS = 8
+CHARS_PER_READING_LINE = 30
+
 LABEL_PATTERNS = [
     r"^ĐC\b",
     r"^Chủ sự\b",
@@ -1134,9 +1138,26 @@ def liturgical_day_html(liturgical_day: LiturgicalDay | None) -> str:
     )
 
 
-def page_shell(title: str, body: str, updated: str, nav: str, liturgical_day: LiturgicalDay | None = None) -> str:
+def page_shell(
+    title: str,
+    body: str,
+    updated: str,
+    nav: str,
+    liturgical_day: LiturgicalDay | None = None,
+    show_metadata: bool = True,
+    show_title: bool = True,
+    page_note: str = "",
+) -> str:
     escaped_title = html.escape(title, quote=True)
-    feast_html = liturgical_day_html(liturgical_day)
+    feast_html = liturgical_day_html(liturgical_day) if show_metadata else ""
+    metadata_html = (
+        f'    <p class="updated">Cập nhật: {html.escape(updated)}</p>\n'
+        f"    {feast_html}\n"
+        if show_metadata
+        else ""
+    )
+    page_note_html = f'    <p class="updated">{html.escape(page_note)}</p>\n' if page_note else ""
+    title_html = f"    <h1>{html.escape(title)}</h1>\n" if show_title else ""
     return f"""<!doctype html>
 <html lang="vi">
 <head>
@@ -1148,13 +1169,10 @@ def page_shell(title: str, body: str, updated: str, nav: str, liturgical_day: Li
 <body>
   <main>
     {nav}
-    <h1>{html.escape(title)}</h1>
-    <p class="updated">Cập nhật: {html.escape(updated)}</p>
-    {feast_html}
+{title_html}{metadata_html}{page_note_html}
     {body}
     {nav}
   </main>
-  <script src="kindle-scroll.js"></script>
 </body>
 </html>
 """
@@ -1180,11 +1198,147 @@ def nav_html(previous_prayer: Prayer | None, next_prayer: Prayer | None) -> str:
     )
 
 
+def prayer_page_filename(slug: str, page_number: int) -> str:
+    return f"{slug}.html" if page_number == 1 else f"{slug}-{page_number}.html"
+
+
+def text_units(text: str) -> int:
+    normalized = re.sub(r"\s+", " ", text).strip()
+    if not normalized:
+        return 0
+    return max(1, (len(normalized) + CHARS_PER_READING_LINE - 1) // CHARS_PER_READING_LINE)
+
+
+def block_units(block_html: str) -> int:
+    soup = BeautifulSoup(block_html, "lxml")
+    text = soup.get_text(" ", strip=True)
+    br_count = len(soup.find_all("br"))
+    heading_count = len(soup.find_all(["h2", "h3"]))
+    return max(1, text_units(text) + br_count + heading_count)
+
+
+def is_heading_block(block_html: str) -> bool:
+    soup = BeautifulSoup(block_html, "lxml")
+    first = soup.find(["h2", "h3"])
+    return bool(first and first.get_text(strip=True))
+
+
+def html_blocks(fragment: str) -> list[str]:
+    soup = fragment_soup(fragment)
+    wrapper = soup.find("div")
+    if not wrapper:
+        return []
+
+    blocks: list[str] = []
+
+    def collect(node) -> None:
+        if isinstance(node, Comment):
+            return
+        if isinstance(node, NavigableString):
+            if node.strip():
+                blocks.append(f"<p>{html.escape(str(node).strip())}</p>")
+            return
+        if not isinstance(node, Tag):
+            return
+
+        classes = set(node.get("class", []))
+        if node.name in {"h2", "h3"} or classes & {
+            "antiphon",
+            "indexing",
+            "label",
+            "note",
+            "right-indexing",
+            "stanza",
+            "title",
+        }:
+            blocks.append(str(node))
+            return
+
+        if node.name == "p":
+            verse_lines = node.select(".verse-line, .verse-continuation")
+            if len(verse_lines) > 1:
+                for verse_line in verse_lines:
+                    blocks.append(f"<p>{verse_line}</p>")
+            else:
+                blocks.append(str(node))
+            return
+
+        meaningful_children = [
+            child
+            for child in node.contents
+            if not (isinstance(child, NavigableString) and not child.strip())
+        ]
+        if node.name == "div" and meaningful_children:
+            for child in meaningful_children:
+                collect(child)
+            return
+
+        blocks.append(str(node))
+
+    for child in list(wrapper.contents):
+        collect(child)
+    return blocks
+
+
+def paginate_html(fragment: str) -> list[str]:
+    blocks = html_blocks(fragment)
+    if not blocks:
+        return [fragment]
+
+    pages: list[list[str]] = []
+    current: list[str] = []
+    current_units = 0
+
+    for block in blocks:
+        units = block_units(block)
+        target = FIRST_PAGE_TARGET_UNITS if not pages else PAGE_TARGET_UNITS
+        if current and is_heading_block(block):
+            pages.append(current)
+            current = []
+            current_units = 0
+            target = PAGE_TARGET_UNITS
+        if current and current_units + units > target:
+            pages.append(current)
+            current = []
+            current_units = 0
+            target = PAGE_TARGET_UNITS
+        current.append(block)
+        current_units += units
+
+    if current:
+        pages.append(current)
+
+    return ["\n".join(page) for page in pages]
+
+
+def page_nav_html(
+    previous_href: str | None,
+    next_href: str | None,
+    page_number: int,
+    page_count: int,
+) -> str:
+    previous_item = (
+        f'<a href="{previous_href}">Trang trước</a>' if previous_href else '<span>Trang trước</span>'
+    )
+    next_item = f'<a href="{next_href}">Trang sau</a>' if next_href else '<span>Trang sau</span>'
+    return (
+        '<nav class="page-nav paged-nav">'
+        f"{previous_item}"
+        '<a href="index.html">Mục lục</a>'
+        f'<span class="page-count">{page_number}/{page_count}</span>'
+        f"{next_item}"
+        "</nav>"
+    )
+
+
 def write_site(prayers: list[Prayer], liturgical_day: LiturgicalDay | None = None) -> None:
     SITE_DIR.mkdir(parents=True, exist_ok=True)
     error_page = SITE_DIR / "error.html"
     if error_page.exists():
         error_page.unlink()
+    for _, slug in PRAYERS:
+        for path in SITE_DIR.glob(f"{slug}*.html"):
+            path.unlink()
     updated = datetime.now(VN_TZ).strftime("%d/%m/%Y %H:%M giờ Việt Nam")
 
     index_items = "\n".join(
@@ -1204,14 +1358,42 @@ def write_site(prayers: list[Prayer], liturgical_day: LiturgicalDay | None = Non
 
     prayer_by_slug = {prayer.slug: prayer for prayer in prayers}
     ordered = [prayer_by_slug[slug] for _, slug in PRAYERS]
+    paginated = {prayer.slug: paginate_html(prayer.body_html) for prayer in ordered}
     for index, prayer in enumerate(ordered):
-        previous_prayer = ordered[index - 1] if index > 0 else None
-        next_prayer = ordered[index + 1] if index + 1 < len(ordered) else None
-        nav = nav_html(previous_prayer, next_prayer)
-        (SITE_DIR / f"{prayer.slug}.html").write_text(
-            page_shell(prayer.title, prayer.body_html, updated, nav, liturgical_day),
-            encoding="utf-8",
-        )
+        pages = paginated[prayer.slug]
+        page_count = len(pages)
+        for page_index, page_body in enumerate(pages, start=1):
+            previous_href = None
+            next_href = None
+
+            if page_index > 1:
+                previous_href = prayer_page_filename(prayer.slug, page_index - 1)
+            elif index > 0:
+                previous_prayer = ordered[index - 1]
+                previous_page_count = len(paginated[previous_prayer.slug])
+                previous_href = prayer_page_filename(previous_prayer.slug, previous_page_count)
+
+            if page_index < page_count:
+                next_href = prayer_page_filename(prayer.slug, page_index + 1)
+            elif index + 1 < len(ordered):
+                next_prayer = ordered[index + 1]
+                next_href = prayer_page_filename(next_prayer.slug, 1)
+
+            nav = page_nav_html(previous_href, next_href, page_index, page_count)
+            page_note = f"Trang {page_index}/{page_count}" if page_index > 1 else ""
+            (SITE_DIR / prayer_page_filename(prayer.slug, page_index)).write_text(
+                page_shell(
+                    prayer.title,
+                    page_body,
+                    updated,
+                    nav,
+                    liturgical_day,
+                    show_metadata=page_index == 1,
+                    show_title=page_index == 1,
+                    page_note=page_note,
+                ),
+                encoding="utf-8",
+            )
 
 
 def write_error_page(message: str) -> None:
