@@ -1154,6 +1154,7 @@ def page_shell(title: str, body: str, updated: str, nav: str, liturgical_day: Li
     {body}
     {nav}
   </main>
+  <script src="kindle-scroll.js"></script>
 </body>
 </html>
 """
