@@ -8,7 +8,7 @@ html {
 
 body {
   margin: 0;
-  padding: 24px 54px 78px 54px;
+  padding: 24px 34px 64px 34px;
   color: #111;
   background: #fff;
   font-family: Georgia, "Times New Roman", serif;
@@ -18,13 +18,8 @@ body {
 }
 
 main {
-  max-width: 17em;
-  min-height: calc(100vh - 102px);
+  max-width: none;
   margin: 0 auto;
-  display: -webkit-box;
-  display: flex;
-  -webkit-box-orient: vertical;
-  flex-direction: column;
 }
 
 h1 {
@@ -52,7 +47,7 @@ a {
 }
 
 p {
-  margin: 0 0 14px 0;
+  margin: 0 0 16px 0;
 }
 
 .updated {
@@ -153,7 +148,7 @@ em,
 }
 
 .page-nav:last-child {
-  margin: auto 0 0 0;
+  margin: 22px 0 0 0;
   padding: 12px 0 0 0;
   border-top: 2px solid #777;
   border-bottom: 0;
@@ -211,14 +206,13 @@ code {
 
 @media (max-width: 520px) {
   body {
-    padding: 20px 46px 78px 46px;
+    padding: 20px 30px 64px 30px;
     font-size: 40px;
     line-height: 1.44;
   }
 
   main {
     max-width: none;
-    min-height: calc(100vh - 98px);
   }
 
   h1 {
