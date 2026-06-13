@@ -8,36 +8,36 @@ html {
 
 body {
   margin: 0;
-  padding: 18px 26px 92px 26px;
+  padding: 22px 92px 72px 38px;
   color: #111;
   background: #fff;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 29px;
+  font-size: 36px;
   font-weight: 500;
-  line-height: 1.58;
+  line-height: 1.5;
 }
 
 main {
-  max-width: 24em;
+  max-width: 18em;
   margin: 0 auto;
 }
 
 h1 {
   margin: 0 0 12px 0;
   text-align: center;
-  font-size: 36px;
+  font-size: 42px;
   line-height: 1.25;
 }
 
 h2 {
-  margin: 26px 0 12px 0;
-  font-size: 33px;
+  margin: 30px 0 14px 0;
+  font-size: 40px;
   line-height: 1.3;
 }
 
 h3 {
-  margin: 20px 0 10px 0;
-  font-size: 30px;
+  margin: 24px 0 12px 0;
+  font-size: 37px;
   line-height: 1.35;
 }
 
@@ -48,7 +48,7 @@ a {
 
 .updated {
   margin: 0 0 16px 0;
-  font-size: 23px;
+  font-size: 28px;
   text-align: center;
 }
 
@@ -59,7 +59,7 @@ em,
 }
 
 .note {
-  font-size: 26px;
+  font-size: 32px;
   line-height: 1.45;
   margin: 6px 0 16px 0;
 }
@@ -72,20 +72,20 @@ em,
 }
 
 .feast-date {
-  font-size: 24px;
+  font-size: 30px;
   line-height: 1.35;
   margin: 0 0 4px 0;
 }
 
 .feast-title {
   font-weight: bold;
-  font-size: 31px;
+  font-size: 37px;
   line-height: 1.3;
 }
 
 .feast-rank {
   font-style: italic;
-  font-size: 25px;
+  font-size: 31px;
   line-height: 1.4;
 }
 
@@ -97,9 +97,9 @@ em,
 
 .home-list a {
   display: block;
-  padding: 20px 4px;
+  padding: 24px 4px;
   border-bottom: 2px solid #777;
-  font-size: 33px;
+  font-size: 40px;
   font-weight: bold;
   text-decoration: none;
 }
@@ -108,7 +108,7 @@ em,
   margin: 0 0 18px 0;
   padding: 0 0 14px 0;
   border-bottom: 2px solid #777;
-  font-size: 25px;
+  font-size: 30px;
   line-height: 1.25;
   text-align: center;
 }
@@ -191,33 +191,36 @@ code {
 }
 
 .page-controls {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 8px;
+  position: absolute;
+  right: 8px;
+  top: 140px;
   z-index: 10;
-  text-align: center;
+  width: 72px;
 }
 
 .page-controls button {
-  display: inline-block;
-  width: 96px;
-  height: 62px;
-  margin: 0 6px;
+  display: block;
+  width: 64px;
+  height: 58px;
+  margin: 0 0 10px 0;
   border: 2px solid #111;
   color: #111;
   background: #fff;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 30px;
+  font-size: 27px;
   font-weight: bold;
   line-height: 1;
 }
 
+.page-controls .top-button {
+  font-size: 17px;
+}
+
 @media (max-width: 520px) {
   body {
-    padding: 16px 22px 92px 22px;
-    font-size: 30px;
-    line-height: 1.56;
+    padding: 18px 86px 72px 34px;
+    font-size: 36px;
+    line-height: 1.48;
   }
 
   main {
@@ -225,11 +228,11 @@ code {
   }
 
   h1 {
-    font-size: 35px;
+    font-size: 41px;
   }
 
   h2 {
-    font-size: 32px;
+    font-size: 39px;
   }
 
   .page-nav a,
