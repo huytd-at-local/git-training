@@ -73,6 +73,8 @@ FIRST_PAGE_TARGET_UNITS = 14
 CHARS_PER_READING_LINE = 30
 MIN_UNITS_BEFORE_HEADING_BREAK = 7
 MIN_PAGE_UNITS = 7
+SPLIT_PARAGRAPH_MIN_LINES = 4
+SPLIT_PARAGRAPH_CHUNK_LINES = 2
 
 LABEL_PATTERNS = [
     r"^ĐC\b",
@@ -1234,6 +1236,66 @@ def page_units(blocks: list[str]) -> int:
     return sum(block_units(block) for block in blocks)
 
 
+def paragraph_lines(node: Tag) -> list[str]:
+    if len(node.find_all("br", recursive=False)) + 1 < SPLIT_PARAGRAPH_MIN_LINES:
+        return []
+
+    lines: list[str] = []
+    current: list[str] = []
+    for child in node.contents:
+        if isinstance(child, Tag) and child.name == "br":
+            line = "".join(current).strip()
+            if line:
+                lines.append(line)
+            current = []
+            continue
+        current.append(str(child))
+
+    line = "".join(current).strip()
+    if line:
+        lines.append(line)
+
+    return lines if len(lines) >= SPLIT_PARAGRAPH_MIN_LINES else []
+
+
+def render_split_paragraph(node: Tag, lines: list[str]) -> str:
+    classes = [class_name for class_name in node.get("class", []) if class_name != "split-block"]
+    classes.append("split-block")
+    class_attr = html.escape(" ".join(classes), quote=True)
+    return f'<p class="{class_attr}">{"<br/>".join(lines)}</p>'
+
+
+def split_block_to_fit(block_html: str, remaining_units: int) -> tuple[str, str] | None:
+    if remaining_units < 2:
+        return None
+
+    soup = BeautifulSoup(block_html, "lxml")
+    paragraph = soup.find("p")
+    if not paragraph:
+        return None
+
+    lines = paragraph_lines(paragraph)
+    if not lines:
+        return None
+
+    best_cut = 0
+    for cut in range(SPLIT_PARAGRAPH_CHUNK_LINES, len(lines)):
+        prefix = render_split_paragraph(paragraph, lines[:cut])
+        if block_units(prefix) <= remaining_units:
+            best_cut = cut
+        else:
+            break
+
+    if best_cut <= 0:
+        return None
+    if len(lines) - best_cut == 1 and best_cut > SPLIT_PARAGRAPH_CHUNK_LINES:
+        best_cut -= 1
+
+    prefix = render_split_paragraph(paragraph, lines[:best_cut])
+    suffix = render_split_paragraph(paragraph, lines[best_cut:])
+    return prefix, suffix
+
+
 def rebalance_short_pages(pages: list[list[str]]) -> list[list[str]]:
     index = 1
     while index < len(pages):
@@ -1345,8 +1407,10 @@ def paginate_html(fragment: str) -> list[str]:
     pages: list[list[str]] = []
     current: list[str] = []
     current_units = 0
+    pending = list(blocks)
 
-    for block in blocks:
+    while pending:
+        block = pending.pop(0)
         units = block_units(block)
         target = FIRST_PAGE_TARGET_UNITS if not pages else PAGE_TARGET_UNITS
         if current and is_heading_block(block) and current_units >= MIN_UNITS_BEFORE_HEADING_BREAK:
@@ -1355,6 +1419,15 @@ def paginate_html(fragment: str) -> list[str]:
             current_units = 0
             target = PAGE_TARGET_UNITS
         if current and current_units + units > target:
+            split = split_block_to_fit(block, target - current_units)
+            if split:
+                prefix, suffix = split
+                current.append(prefix)
+                pages.append(current)
+                current = []
+                current_units = 0
+                pending.insert(0, suffix)
+                continue
             pages.append(current)
             current = []
             current_units = 0

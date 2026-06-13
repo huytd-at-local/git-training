@@ -50,6 +50,10 @@ p {
   margin: 0 0 16px 0;
 }
 
+p.split-block {
+  margin-bottom: 10px;
+}
+
 .updated {
   margin: 0 0 16px 0;
   font-size: 31px;
