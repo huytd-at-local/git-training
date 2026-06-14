@@ -38,6 +38,8 @@ grep -q 'class="verse-line"' site/kinh-sang*.html
 grep -q 'class="verse-line"' site/kinh-toi*.html
 grep -q '.antiphon .pre' site/style.css
 grep -q 'window.location.replace' site/index.html
+grep -q 'getUTCHours' site/index.html
+! grep -q 'getHours' site/index.html
 grep -q 'class="date-nav"' site/index.html
 ! grep -q 'class="date-nav"' site/kinh-sang.html
 grep -q '<span class="page-count">1/' site/kinh-sang.html

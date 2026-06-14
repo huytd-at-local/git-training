@@ -10,11 +10,12 @@
   (function() {
     var days = ['2026-06-13','2026-06-14','2026-06-15'];
     var now = new Date();
-    var y = now.getFullYear();
-    var m = now.getMonth() + 1;
-    var d = now.getDate();
+    var vn = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+    var y = vn.getUTCFullYear();
+    var m = vn.getUTCMonth() + 1;
+    var d = vn.getUTCDate();
     var key = y + '-' + (m < 10 ? '0' + m : m) + '-' + (d < 10 ? '0' + d : d);
-    var h = now.getHours();
+    var h = vn.getUTCHours();
     var slug = 'kinh-toi';
     if (h < 4) slug = 'kinh-toi';
     else if (h < 6) slug = 'kinh-sach';
@@ -36,7 +37,7 @@
   <main>
 
     <h1>Các Giờ Kinh Phụng Vụ</h1>
-    <p class="updated">Cập nhật: 14/06/2026 13:42 giờ Việt Nam</p>
+    <p class="updated">Cập nhật: 14/06/2026 13:53 giờ Việt Nam</p>
     <section class="liturgical-day">
   <div class="feast-title">Chúa Nhật Tuần XI - Mùa Thường Niên</div>
 </section>

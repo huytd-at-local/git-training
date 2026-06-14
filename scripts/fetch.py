@@ -1600,11 +1600,12 @@ def root_redirect_script(day_sites: list[DaySite]) -> str:
   (function() {{
     var days = [{entries}];
     var now = new Date();
-    var y = now.getFullYear();
-    var m = now.getMonth() + 1;
-    var d = now.getDate();
+    var vn = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+    var y = vn.getUTCFullYear();
+    var m = vn.getUTCMonth() + 1;
+    var d = vn.getUTCDate();
     var key = y + '-' + (m < 10 ? '0' + m : m) + '-' + (d < 10 ? '0' + d : d);
-    var h = now.getHours();
+    var h = vn.getUTCHours();
     var slug = 'kinh-toi';
     if (h < 4) slug = 'kinh-toi';
     else if (h < 6) slug = 'kinh-sach';
