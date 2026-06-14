@@ -37,6 +37,10 @@ grep -q 'Tv 94 (95)' site/kinh-sang*.html
 grep -q 'class="verse-line"' site/kinh-sang*.html
 grep -q 'class="verse-line"' site/kinh-toi*.html
 grep -q '.antiphon .pre' site/style.css
+grep -q 'window.location.replace' site/index.html
+grep -q 'class="date-nav"' site/index.html
+! grep -q 'class="date-nav"' site/kinh-sang.html
+grep -q '<span class="page-count">1/' site/kinh-sang.html
 ! grep -q 'class="reading-ref"' site/*.html
 grep -q 'Xin Thiên Chúa toàn năng' site/kinh-sang*.html
 grep -q 'Xin Thiên Chúa toàn năng' site/kinh-chieu*.html
@@ -53,6 +57,15 @@ for path in Path("site").glob("*.html"):
     text = path.read_text(encoding="utf-8")
     if 'class="verse-line"' in text and '</span><br/><span class="verse-line"' in text:
         raise SystemExit(f"Unexpected blank-line br between verse lines in {path}")
+
+dated_indexes = sorted(Path("site").glob("20??-??-??/index.html"))
+if len(dated_indexes) < 3:
+    raise SystemExit("Expected yesterday/today/tomorrow dated indexes")
+
+for path in Path("site").glob("*.html"):
+    text = path.read_text(encoding="utf-8")
+    if text.count("Chúa Nhật Tuần XI - Mùa Thường Niên") > 1:
+        raise SystemExit(f"Repeated liturgical title in {path}")
 PY
 
 if test -f build/kinh-toi.json; then

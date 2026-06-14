@@ -8,7 +8,7 @@ html {
 
 body {
   margin: 0;
-  padding: 24px 34px 64px 34px;
+  padding: 24px 34px 20px 34px;
   color: #111;
   background: #fff;
   font-family: Georgia, "Times New Roman", serif;
@@ -103,6 +103,30 @@ em,
   list-style: none;
 }
 
+.date-nav {
+  margin: 0 0 18px 0;
+  padding: 0 0 14px 0;
+  border-bottom: 2px solid #777;
+  font-size: 34px;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.date-nav a {
+  display: inline-block;
+  width: 30%;
+  margin: 0 2px 8px 0;
+  padding: 12px 2px;
+  border: 2px solid #777;
+  text-align: center;
+  text-decoration: none;
+}
+
+.date-nav a.active {
+  color: #fff;
+  background: #111;
+}
+
 .home-list a {
   display: block;
   padding: 26px 4px;
@@ -130,7 +154,7 @@ em,
   display: inline-block;
   min-width: 5em;
   margin: 0 5px 8px 0;
-  padding: 12px 8px;
+  padding: 16px 8px;
   border: 2px solid #777;
   text-align: center;
   text-decoration: none;
@@ -144,7 +168,9 @@ em,
 .paged-nav a,
 .paged-nav span {
   min-width: 0;
-  width: 23%;
+  width: 24%;
+  min-height: 78px;
+  vertical-align: top;
 }
 
 .paged-nav .page-count {
@@ -210,7 +236,7 @@ code {
 
 @media (max-width: 520px) {
   body {
-    padding: 20px 30px 64px 30px;
+    padding: 20px 30px 20px 30px;
     font-size: 40px;
     line-height: 1.44;
   }
@@ -237,6 +263,6 @@ code {
 
   .paged-nav a,
   .paged-nav span {
-    width: 23%;
+    width: 24%;
   }
 }

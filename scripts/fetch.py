@@ -9,7 +9,7 @@ import re
 import sys
 import unicodedata
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable
 
@@ -68,11 +68,11 @@ PRAYERS = [
     ("Kinh Tối", "kinh-toi"),
 ]
 
-PAGE_TARGET_UNITS = 16
+PAGE_TARGET_UNITS = 17
 FIRST_PAGE_TARGET_UNITS = 14
 CHARS_PER_READING_LINE = 30
 MIN_UNITS_BEFORE_HEADING_BREAK = 7
-MIN_PAGE_UNITS = 7
+MIN_PAGE_UNITS = 12
 SPLIT_PARAGRAPH_MIN_LINES = 4
 SPLIT_PARAGRAPH_CHUNK_LINES = 2
 
@@ -169,6 +169,14 @@ class LiturgicalDay:
     rank: str
     selector: str
     date_title: str = ""
+
+
+@dataclass(frozen=True)
+class DaySite:
+    date: datetime
+    prayers: list[Prayer]
+    liturgical_day: LiturgicalDay | None
+    debug_lines: list[str]
 
 
 def setup_logging(verbose: bool) -> None:
@@ -1130,14 +1138,18 @@ def liturgical_day_html(liturgical_day: LiturgicalDay | None) -> str:
     if not liturgical_day:
         return ""
     title = html.escape(liturgical_day.title)
-    date_title = html.escape(liturgical_day.date_title)
+    date_title_value = liturgical_day.date_title
+    if normalize_key(date_title_value) == normalize_key(liturgical_day.title):
+        date_title_value = ""
+    date_title = html.escape(date_title_value)
     rank = html.escape(liturgical_day.rank)
     date_html = f'  <div class="feast-date">{date_title}</div>\n' if date_title else ""
+    rank_html = f'  <div class="feast-rank">{rank}</div>\n' if rank else ""
     return (
         '<section class="liturgical-day">\n'
         f"{date_html}"
         f'  <div class="feast-title">{title}</div>\n'
-        f'  <div class="feast-rank">{rank}</div>\n'
+        f"{rank_html}"
         "</section>"
     )
 
@@ -1155,8 +1167,12 @@ def page_shell(
     show_metadata: bool = True,
     show_title: bool = True,
     page_note: str = "",
+    css_href: str = "style.css",
+    extra_head: str = "",
+    bottom_nav: str | None = None,
 ) -> str:
     escaped_title = html.escape(title, quote=True)
+    escaped_css_href = html.escape(css_href, quote=True)
     feast_html = liturgical_day_html(liturgical_day) if show_metadata else ""
     metadata_html = (
         f'    <p class="updated">Cập nhật: {html.escape(updated)}</p>\n'
@@ -1172,14 +1188,15 @@ def page_shell(
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{escaped_title}</title>
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="{escaped_css_href}">
+{extra_head}
 </head>
 <body>
   <main>
     {nav}
 {title_html}{metadata_html}{page_note_html}
     {body}
-    {nav}
+    {bottom_nav if bottom_nav is not None else nav}
   </main>
 </body>
 </html>
@@ -1208,6 +1225,35 @@ def nav_html(previous_prayer: Prayer | None, next_prayer: Prayer | None) -> str:
 
 def prayer_page_filename(slug: str, page_number: int) -> str:
     return f"{slug}.html" if page_number == 1 else f"{slug}-{page_number}.html"
+
+
+def date_dir_name(date: datetime) -> str:
+    return date.strftime("%Y-%m-%d")
+
+
+def day_href(date: datetime, slug: str = "index", page_number: int = 1) -> str:
+    filename = "index.html" if slug == "index" else prayer_page_filename(slug, page_number)
+    return f"{date_dir_name(date)}/{filename}"
+
+
+def relative_day_href(from_dir: str, target_date: datetime, slug: str = "index", page_number: int = 1) -> str:
+    href = day_href(target_date, slug, page_number)
+    return f"../{href}" if from_dir else href
+
+
+def date_nav_html(
+    current_date: datetime,
+    available_dates: list[datetime],
+    from_dir: str,
+    slug: str = "index",
+) -> str:
+    items: list[str] = []
+    for date in available_dates:
+        label = f"{date.day}/{date.month}"
+        href = relative_day_href(from_dir, date, slug)
+        cls = ' class="active"' if date.date() == current_date.date() else ""
+        items.append(f'<a{cls} href="{href}">{html.escape(label)}</a>')
+    return '<nav class="date-nav">' + "".join(items) + "</nav>"
 
 
 def text_units(text: str) -> int:
@@ -1311,6 +1357,12 @@ def rebalance_short_pages(pages: list[list[str]]) -> list[list[str]]:
                 pages[index].append(pages[index + 1].pop(0))
                 if not pages[index + 1]:
                     del pages[index + 1]
+                continue
+            split = split_block_to_fit(next_block, PAGE_TARGET_UNITS - current_units)
+            if split:
+                prefix, suffix = split
+                pages[index].append(prefix)
+                pages[index + 1][0] = suffix
                 continue
 
         if index > 0 and pages[index - 1]:
@@ -1447,6 +1499,7 @@ def page_nav_html(
     next_href: str | None,
     page_number: int,
     page_count: int,
+    index_href: str = "index.html",
 ) -> str:
     previous_item = (
         f'<a href="{previous_href}">Trang trước</a>' if previous_href else '<span>Trang trước</span>'
@@ -1454,36 +1507,49 @@ def page_nav_html(
     next_item = f'<a href="{next_href}">Trang sau</a>' if next_href else '<span>Trang sau</span>'
     return (
         '<nav class="page-nav paged-nav">'
-        f"{previous_item}"
-        '<a href="index.html">Mục lục</a>'
         f'<span class="page-count">{page_number}/{page_count}</span>'
+        f'<a href="{index_href}">Mục lục</a>'
+        f"{previous_item}"
         f"{next_item}"
         "</nav>"
     )
 
 
-def write_site(prayers: list[Prayer], liturgical_day: LiturgicalDay | None = None) -> None:
-    SITE_DIR.mkdir(parents=True, exist_ok=True)
-    error_page = SITE_DIR / "error.html"
-    if error_page.exists():
-        error_page.unlink()
+def write_day_site(
+    target_dir: Path,
+    css_href: str,
+    prayers: list[Prayer],
+    liturgical_day: LiturgicalDay | None,
+    date: datetime,
+    available_dates: list[datetime],
+    updated: str,
+    from_dir: str,
+) -> None:
+    target_dir.mkdir(parents=True, exist_ok=True)
     for _, slug in PRAYERS:
-        for path in SITE_DIR.glob(f"{slug}*.html"):
+        for path in target_dir.glob(f"{slug}*.html"):
             path.unlink()
-    updated = datetime.now(VN_TZ).strftime("%d/%m/%Y %H:%M giờ Việt Nam")
-
     index_items = "\n".join(
         f'<li><a href="{slug}.html">{html.escape(title)}</a></li>' for title, slug in PRAYERS
     )
     index_body = f"""
+{date_nav_html(date, available_dates, from_dir)}
 <section class="home-list">
   <ul>
     {index_items}
   </ul>
 </section>
 """
-    (SITE_DIR / "index.html").write_text(
-        page_shell("Các Giờ Kinh Phụng Vụ", index_body, updated, "", liturgical_day),
+    (target_dir / "index.html").write_text(
+        page_shell(
+            "Các Giờ Kinh Phụng Vụ",
+            index_body,
+            updated,
+            "",
+            liturgical_day,
+            css_href=css_href,
+            bottom_nav="",
+        ),
         encoding="utf-8",
     )
 
@@ -1509,9 +1575,10 @@ def write_site(prayers: list[Prayer], liturgical_day: LiturgicalDay | None = Non
                 next_prayer = ordered[index + 1]
                 next_href = prayer_page_filename(next_prayer.slug, 1)
 
-            nav = page_nav_html(previous_href, next_href, page_index, page_count)
+            index_href = "index.html" if from_dir else day_href(date)
+            nav = page_nav_html(previous_href, next_href, page_index, page_count, index_href)
             page_note = f"Trang {page_index}/{page_count}" if page_index > 1 else ""
-            (SITE_DIR / prayer_page_filename(prayer.slug, page_index)).write_text(
+            (target_dir / prayer_page_filename(prayer.slug, page_index)).write_text(
                 page_shell(
                     prayer.title,
                     page_body,
@@ -1521,10 +1588,86 @@ def write_site(prayers: list[Prayer], liturgical_day: LiturgicalDay | None = Non
                     show_metadata=page_index == 1,
                     show_title=page_index == 1,
                     page_note=page_note,
+                    css_href=css_href,
                 ),
                 encoding="utf-8",
             )
 
+
+def root_redirect_script(day_sites: list[DaySite]) -> str:
+    entries = ",".join("'%s'" % site.date.strftime("%Y-%m-%d") for site in day_sites)
+    return f"""  <script>
+  (function() {{
+    var days = [{entries}];
+    var now = new Date();
+    var y = now.getFullYear();
+    var m = now.getMonth() + 1;
+    var d = now.getDate();
+    var key = y + '-' + (m < 10 ? '0' + m : m) + '-' + (d < 10 ? '0' + d : d);
+    var h = now.getHours();
+    var slug = 'kinh-toi';
+    if (h < 4) slug = 'kinh-toi';
+    else if (h < 6) slug = 'kinh-sach';
+    else if (h < 8) slug = 'kinh-sang';
+    else if (h < 11) slug = 'kinh-trua-gio-ba';
+    else if (h < 13) slug = 'kinh-trua-gio-sau';
+    else if (h < 17) slug = 'kinh-trua-gio-chin';
+    else if (h < 20) slug = 'kinh-chieu';
+    for (var i = 0; i < days.length; i++) {{
+      if (days[i] === key) {{
+        window.location.replace(days[i] + '/' + slug + '.html');
+        return;
+      }}
+    }}
+  }})();
+  </script>"""
+
+
+def write_site(day_sites: list[DaySite]) -> None:
+    SITE_DIR.mkdir(parents=True, exist_ok=True)
+    error_page = SITE_DIR / "error.html"
+    if error_page.exists():
+        error_page.unlink()
+    for _, slug in PRAYERS:
+        for path in SITE_DIR.glob(f"{slug}*.html"):
+            path.unlink()
+    for site in day_sites:
+        day_dir = SITE_DIR / date_dir_name(site.date)
+        if day_dir.exists():
+            for path in day_dir.glob("*.html"):
+                path.unlink()
+
+    updated = datetime.now(VN_TZ).strftime("%d/%m/%Y %H:%M giờ Việt Nam")
+    available_dates = [site.date for site in day_sites]
+    today = day_sites[len(day_sites) // 2]
+    for site in day_sites:
+        write_day_site(
+            SITE_DIR / date_dir_name(site.date),
+            "../style.css",
+            site.prayers,
+            site.liturgical_day,
+            site.date,
+            available_dates,
+            updated,
+            date_dir_name(site.date),
+        )
+
+    write_day_site(
+        SITE_DIR,
+        "style.css",
+        today.prayers,
+        today.liturgical_day,
+        today.date,
+        available_dates,
+        updated,
+        "",
+    )
+
+    root_index = SITE_DIR / "index.html"
+    root_index.write_text(
+        root_index.read_text(encoding="utf-8").replace("</head>", root_redirect_script(day_sites) + "\n</head>"),
+        encoding="utf-8",
+    )
 
 def write_error_page(message: str) -> None:
     SITE_DIR.mkdir(parents=True, exist_ok=True)
@@ -1556,7 +1699,18 @@ def main() -> int:
         source = fetch_source(session, args.url)
         save_debug_source(source)
         if args.url == SOURCE_URL:
-            prayers, liturgical_day, debug_lines = build_prayers_from_api(session, source, run_date)
+            day_sites: list[DaySite] = []
+            fetch_dates = [
+                run_date - timedelta(days=1),
+                run_date + timedelta(days=1),
+                run_date,
+            ]
+            for fetch_date in fetch_dates:
+                prayers, liturgical_day, debug_lines = build_prayers_from_api(session, source, fetch_date)
+                if sorted(prayer.slug for prayer in prayers) != sorted(slug for _, slug in PRAYERS):
+                    raise ValueError("Parsed prayers do not match expected fixed list")
+                day_sites.append(DaySite(fetch_date, prayers, liturgical_day, debug_lines))
+            day_sites.sort(key=lambda item: item.date)
         else:
             logging.warning("Non-default URL supplied; using DOM-only fallback parser")
             soup = clean_soup(source)
@@ -1569,11 +1723,12 @@ def main() -> int:
                 "Main content selector used: DOM fallback content_root()",
                 "WARNING: liturgical day not found in DOM fallback; tried payload selectors only on default URL",
             ]
-        if sorted(prayer.slug for prayer in prayers) != sorted(slug for _, slug in PRAYERS):
-            raise ValueError("Parsed prayers do not match expected fixed list")
-        write_site(prayers, liturgical_day)
-        append_debug(debug_lines)
-        logging.info("Generated %d prayer pages in %s", len(prayers), SITE_DIR.relative_to(ROOT))
+            if sorted(prayer.slug for prayer in prayers) != sorted(slug for _, slug in PRAYERS):
+                raise ValueError("Parsed prayers do not match expected fixed list")
+            day_sites = [DaySite(run_date, prayers, liturgical_day, debug_lines)]
+        write_site(day_sites)
+        append_debug([line for site in day_sites for line in site.debug_lines])
+        logging.info("Generated %d day(s) of prayer pages in %s", len(day_sites), SITE_DIR.relative_to(ROOT))
         return 0
     except Exception as exc:
         logging.exception("Failed to generate site")

@@ -5,19 +5,44 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Các Giờ Kinh Phụng Vụ</title>
   <link rel="stylesheet" href="style.css">
+
+  <script>
+  (function() {
+    var days = ['2026-06-13','2026-06-14','2026-06-15'];
+    var now = new Date();
+    var y = now.getFullYear();
+    var m = now.getMonth() + 1;
+    var d = now.getDate();
+    var key = y + '-' + (m < 10 ? '0' + m : m) + '-' + (d < 10 ? '0' + d : d);
+    var h = now.getHours();
+    var slug = 'kinh-toi';
+    if (h < 4) slug = 'kinh-toi';
+    else if (h < 6) slug = 'kinh-sach';
+    else if (h < 8) slug = 'kinh-sang';
+    else if (h < 11) slug = 'kinh-trua-gio-ba';
+    else if (h < 13) slug = 'kinh-trua-gio-sau';
+    else if (h < 17) slug = 'kinh-trua-gio-chin';
+    else if (h < 20) slug = 'kinh-chieu';
+    for (var i = 0; i < days.length; i++) {
+      if (days[i] === key) {
+        window.location.replace(days[i] + '/' + slug + '.html');
+        return;
+      }
+    }
+  })();
+  </script>
 </head>
 <body>
   <main>
 
     <h1>Các Giờ Kinh Phụng Vụ</h1>
-    <p class="updated">Cập nhật: 13/06/2026 14:28 giờ Việt Nam</p>
+    <p class="updated">Cập nhật: 14/06/2026 13:42 giờ Việt Nam</p>
     <section class="liturgical-day">
-  <div class="feast-date">Ngày 13 tháng 6</div>
-  <div class="feast-title">Thánh An-tôn Pa-đô-va, linh mục, tiến sĩ Hội Thánh</div>
-  <div class="feast-rank">lễ nhớ bắt buộc</div>
+  <div class="feast-title">Chúa Nhật Tuần XI - Mùa Thường Niên</div>
 </section>
 
 
+<nav class="date-nav"><a href="2026-06-13/index.html">13/6</a><a class="active" href="2026-06-14/index.html">14/6</a><a href="2026-06-15/index.html">15/6</a></nav>
 <section class="home-list">
   <ul>
     <li><a href="kinh-sach.html">Kinh Sách</a></li>
