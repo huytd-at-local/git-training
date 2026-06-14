@@ -1332,6 +1332,10 @@ def render_split_tokens_paragraph(node: Tag, tokens: list[str]) -> str:
 
 
 def split_text_paragraph_to_fit(paragraph: Tag, remaining_units: int) -> tuple[str, str] | None:
+    if remaining_units < 4:
+        return None
+
+    allowed_units = remaining_units + 2
     tokens = paragraph_text_tokens(paragraph)
     if len(tokens) < 8:
         return None
@@ -1339,7 +1343,7 @@ def split_text_paragraph_to_fit(paragraph: Tag, remaining_units: int) -> tuple[s
     best_cut = 0
     for cut in range(1, len(tokens)):
         prefix = render_split_tokens_paragraph(paragraph, tokens[:cut])
-        if block_units(prefix) <= remaining_units:
+        if block_units(prefix) <= allowed_units:
             best_cut = cut
         else:
             break
@@ -1348,10 +1352,14 @@ def split_text_paragraph_to_fit(paragraph: Tag, remaining_units: int) -> tuple[s
         return None
 
     preferred_cut = best_cut
-    for cut in range(best_cut, max(0, best_cut - 24), -1):
-        text = BeautifulSoup(render_split_tokens_paragraph(paragraph, tokens[:cut]), "lxml").get_text(" ", strip=True)
-        if re.search(r"[.!?;:]$", text) and block_units(render_split_tokens_paragraph(paragraph, tokens[:cut])) >= max(2, remaining_units - 3):
-            preferred_cut = cut
+    for punctuation in (r"[.!?][”\"]?$", r"[;:,”“]$"):
+        for cut in range(best_cut, max(0, best_cut - 60), -1):
+            candidate = render_split_tokens_paragraph(paragraph, tokens[:cut])
+            text = BeautifulSoup(candidate, "lxml").get_text(" ", strip=True)
+            if re.search(punctuation, text) and block_units(candidate) >= max(2, remaining_units - 4):
+                preferred_cut = cut
+                break
+        if preferred_cut != best_cut:
             break
     best_cut = preferred_cut
 
