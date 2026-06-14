@@ -55,10 +55,17 @@ fi
 
 "$PYTHON_BIN" - <<'PY'
 from pathlib import Path
-for path in Path("site").glob("*.html"):
+from scripts.fetch import block_units, html_blocks
+
+for path in Path("site").rglob("*.html"):
     text = path.read_text(encoding="utf-8")
     if 'class="verse-line"' in text and '</span><br/><span class="verse-line"' in text:
         raise SystemExit(f"Unexpected blank-line br between verse lines in {path}")
+    if 'class="page-nav paged-nav"' in text:
+        page_body = text.split("</nav>", 1)[1].rsplit('<nav class="page-nav paged-nav">', 1)[0]
+        units = sum(block_units(block) for block in html_blocks(page_body))
+        if units > 20:
+            raise SystemExit(f"Page likely too long for Kindle viewport: {path} ({units} units)")
 
 dated_indexes = sorted(Path("site").glob("20??-??-??/index.html"))
 if len(dated_indexes) < 3:

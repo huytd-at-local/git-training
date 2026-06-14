@@ -1311,6 +1311,58 @@ def render_split_paragraph(node: Tag, lines: list[str]) -> str:
     return f'<p class="{class_attr}">{"<br/>".join(lines)}</p>'
 
 
+def paragraph_text_tokens(node: Tag) -> list[str]:
+    if node.find("br"):
+        return []
+
+    tokens: list[str] = []
+    for child in node.contents:
+        if isinstance(child, NavigableString):
+            tokens.extend(re.findall(r"\s+|\S+\s*", str(child)))
+        elif isinstance(child, Tag):
+            tokens.append(str(child))
+    return [token for token in tokens if token]
+
+
+def render_split_tokens_paragraph(node: Tag, tokens: list[str]) -> str:
+    classes = [class_name for class_name in node.get("class", []) if class_name != "split-block"]
+    classes.append("split-block")
+    class_attr = html.escape(" ".join(classes), quote=True)
+    return f'<p class="{class_attr}">{"".join(tokens).strip()}</p>'
+
+
+def split_text_paragraph_to_fit(paragraph: Tag, remaining_units: int) -> tuple[str, str] | None:
+    tokens = paragraph_text_tokens(paragraph)
+    if len(tokens) < 8:
+        return None
+
+    best_cut = 0
+    for cut in range(1, len(tokens)):
+        prefix = render_split_tokens_paragraph(paragraph, tokens[:cut])
+        if block_units(prefix) <= remaining_units:
+            best_cut = cut
+        else:
+            break
+
+    if best_cut <= 0 or best_cut >= len(tokens):
+        return None
+
+    preferred_cut = best_cut
+    for cut in range(best_cut, max(0, best_cut - 24), -1):
+        text = BeautifulSoup(render_split_tokens_paragraph(paragraph, tokens[:cut]), "lxml").get_text(" ", strip=True)
+        if re.search(r"[.!?;:]$", text) and block_units(render_split_tokens_paragraph(paragraph, tokens[:cut])) >= max(2, remaining_units - 3):
+            preferred_cut = cut
+            break
+    best_cut = preferred_cut
+
+    suffix = render_split_tokens_paragraph(paragraph, tokens[best_cut:])
+    if not BeautifulSoup(suffix, "lxml").get_text(" ", strip=True):
+        return None
+
+    prefix = render_split_tokens_paragraph(paragraph, tokens[:best_cut])
+    return prefix, suffix
+
+
 def split_block_to_fit(block_html: str, remaining_units: int) -> tuple[str, str] | None:
     if remaining_units < 2:
         return None
@@ -1322,7 +1374,7 @@ def split_block_to_fit(block_html: str, remaining_units: int) -> tuple[str, str]
 
     lines = paragraph_lines(paragraph)
     if not lines:
-        return None
+        return split_text_paragraph_to_fit(paragraph, remaining_units)
 
     best_cut = 0
     for cut in range(SPLIT_PARAGRAPH_CHUNK_LINES, len(lines)):
@@ -1345,10 +1397,6 @@ def split_block_to_fit(block_html: str, remaining_units: int) -> tuple[str, str]
 def rebalance_short_pages(pages: list[list[str]]) -> list[list[str]]:
     index = 1
     while index < len(pages):
-        if page_units(pages[index]) >= MIN_PAGE_UNITS:
-            index += 1
-            continue
-
         current_units = page_units(pages[index])
         if index < len(pages) - 1 and pages[index + 1]:
             next_block = pages[index + 1][0]
@@ -1364,6 +1412,10 @@ def rebalance_short_pages(pages: list[list[str]]) -> list[list[str]]:
                 pages[index].append(prefix)
                 pages[index + 1][0] = suffix
                 continue
+
+        if current_units >= MIN_PAGE_UNITS:
+            index += 1
+            continue
 
         if index > 0 and pages[index - 1]:
             previous_block = pages[index - 1][-1]
@@ -1484,6 +1536,13 @@ def paginate_html(fragment: str) -> list[str]:
             current = []
             current_units = 0
             target = PAGE_TARGET_UNITS
+        if not current and units > target:
+            split = split_block_to_fit(block, target)
+            if split:
+                prefix, suffix = split
+                pages.append([prefix])
+                pending.insert(0, suffix)
+                continue
         current.append(block)
         current_units += units
 
