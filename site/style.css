@@ -227,8 +227,8 @@ em,
 
 .verse-line > sup {
   display: table-cell;
-  width: 1.05em;
-  padding-right: 0.15em;
+  width: 1.8em;
+  padding-right: 0.25em;
   margin-right: 0;
   text-align: left;
   vertical-align: baseline;
@@ -242,7 +242,7 @@ em,
 
 .verse-continuation {
   display: block;
-  margin: 0 0 0.2em 1.2em;
+  margin: 0 0 0.2em 2.05em;
 }
 
 .error {
