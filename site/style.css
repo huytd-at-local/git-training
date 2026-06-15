@@ -168,13 +168,24 @@ em,
 .paged-nav a,
 .paged-nav span {
   min-width: 0;
-  width: 24%;
-  min-height: 78px;
+  width: 18%;
+  min-height: 82px;
+  margin-right: 1%;
+  padding: 16px 2px;
   vertical-align: top;
 }
 
-.paged-nav .page-count {
+.paged-nav .nav-icon {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 46px;
   font-weight: bold;
+  line-height: 1;
+}
+
+.paged-nav .nav-index {
+  font-weight: bold;
+  font-size: 30px;
+  line-height: 1.25;
 }
 
 .page-nav:last-child {
@@ -208,20 +219,30 @@ em,
 }
 
 .verse-line {
-  display: block;
-  padding-left: 1.05em;
-  text-indent: -1.05em;
+  display: table;
+  width: 100%;
+  table-layout: fixed;
   margin: 0 0 0.2em 0;
 }
 
 .verse-line > sup {
+  display: table-cell;
+  width: 1.05em;
+  padding-right: 0.15em;
   margin-right: 0;
+  text-align: left;
+  vertical-align: baseline;
+}
+
+.verse-line > span {
+  display: table-cell;
+  width: auto;
+  vertical-align: top;
 }
 
 .verse-continuation {
   display: block;
-  padding-left: 1.05em;
-  margin: 0 0 0.2em 0;
+  margin: 0 0 0.2em 1.2em;
 }
 
 .error {
@@ -263,6 +284,6 @@ code {
 
   .paged-nav a,
   .paged-nav span {
-    width: 24%;
+    width: 18%;
   }
 }

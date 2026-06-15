@@ -23,7 +23,10 @@ for page in $pages; do
   test -s "$file"
   grep -q '<main>' "$file"
   grep -q 'Mục lục' "$file"
-  grep -q 'Trang sau' "$file"
+  grep -q '&#9654;' "$file"
+  grep -q '&#9664;' "$file"
+  ! grep -q 'Trang sau' "$file"
+  ! grep -q 'Trang trước' "$file"
   ! grep -q 'Update Required' "$file"
   ! grep -q 'Flash plugin' "$file"
   ! grep -q 'itunes.apple.com' "$file"
@@ -42,7 +45,7 @@ grep -q 'getUTCHours' site/index.html
 ! grep -q 'getHours' site/index.html
 grep -q 'class="date-nav"' site/index.html
 ! grep -q 'class="date-nav"' site/kinh-sang.html
-grep -q '<span class="page-count">1/' site/kinh-sang.html
+! grep -q 'class="page-count"' site/kinh-sang.html
 ! grep -q 'class="reading-ref"' site/*.html
 grep -q 'Xin Thiên Chúa toàn năng' site/kinh-sang*.html
 grep -q 'Xin Thiên Chúa toàn năng' site/kinh-chieu*.html

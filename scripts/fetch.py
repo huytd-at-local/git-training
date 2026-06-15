@@ -441,8 +441,10 @@ def post_process_render_dom(container: Tag) -> None:
             for sibling in parent.children
         )
         previous = parent.find_previous_sibling("p")
-        previous_numbered = isinstance(previous, Tag) and previous.select_one(".verse-line")
-        if has_numbered_sibling or previous_numbered:
+        previous_verse_related = isinstance(previous, Tag) and previous.select_one(
+            ".verse-line, .verse-continuation"
+        )
+        if has_numbered_sibling or previous_verse_related:
             span["class"] = ["verse-continuation"]
 
     remove_br_between_verse_blocks()
@@ -1569,13 +1571,14 @@ def page_nav_html(
     index_href: str = "index.html",
 ) -> str:
     previous_item = (
-        f'<a href="{previous_href}">Trang trước</a>' if previous_href else '<span>Trang trước</span>'
+        f'<a class="nav-icon" href="{previous_href}">&#9664;</a>' if previous_href else '<span class="nav-icon">&#9664;</span>'
     )
-    next_item = f'<a href="{next_href}">Trang sau</a>' if next_href else '<span>Trang sau</span>'
+    next_item = f'<a class="nav-icon" href="{next_href}">&#9654;</a>' if next_href else '<span class="nav-icon">&#9654;</span>'
     return (
         '<nav class="page-nav paged-nav">'
-        f'<span class="page-count">{page_number}/{page_count}</span>'
-        f'<a href="{index_href}">Mục lục</a>'
+        f"{previous_item}"
+        f"{next_item}"
+        f'<a class="nav-index" href="{index_href}">Mục lục</a>'
         f"{previous_item}"
         f"{next_item}"
         "</nav>"
@@ -1650,12 +1653,13 @@ def write_day_site(
                     prayer.title,
                     page_body,
                     updated,
-                    nav,
+                    "",
                     liturgical_day,
                     show_metadata=page_index == 1,
                     show_title=page_index == 1,
                     page_note=page_note,
                     css_href=css_href,
+                    bottom_nav=nav,
                 ),
                 encoding="utf-8",
             )
