@@ -241,8 +241,17 @@ em,
 }
 
 .verse-continuation {
-  display: block;
-  margin: 0 0 0.2em 2.05em;
+  display: table;
+  width: 100%;
+  table-layout: fixed;
+  margin: 0 0 0.2em 0;
+}
+
+.verse-continuation::before {
+  display: table-cell;
+  width: 1.8em;
+  padding-right: 0.25em;
+  content: "";
 }
 
 .error {
