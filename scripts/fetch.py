@@ -383,6 +383,12 @@ def post_process_render_dom(container: Tag) -> None:
             pre.insert_after(NavigableString(" "))
 
     for sup in container.find_all("sup"):
+        text = sup.get_text(strip=True)
+        if text.isdigit() and len(text) >= 3:
+            classes = list(sup.get("class", []))
+            if "wide-verse-number" not in classes:
+                classes.append("wide-verse-number")
+                sup["class"] = classes
         next_sibling = sup.next_sibling
         if isinstance(next_sibling, Tag) and next_sibling.name == "span":
             sup.insert_after(NavigableString(" "))

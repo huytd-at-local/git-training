@@ -39,6 +39,7 @@ grep -q 'Tv 94 (95)' site/kinh-sang*.html
 ! grep -q 'Tv 94 (95)' site/kinh-sach.html
 grep -q 'class="verse-line"' site/kinh-sang*.html
 grep -q 'class="verse-line"' site/kinh-toi*.html
+grep -q 'wide-verse-number' site/style.css
 grep -q '.antiphon .pre' site/style.css
 grep -q 'window.location.replace' site/index.html
 grep -q 'getUTCHours' site/index.html
@@ -57,11 +58,14 @@ if test -f .cache/source.html && grep -Eq '<(em|i)([ >])' .cache/source.html; th
 fi
 
 "$PYTHON_BIN" - <<'PY'
+import re
 from pathlib import Path
 from scripts.fetch import block_units, html_blocks
 
 for path in Path("site").rglob("*.html"):
     text = path.read_text(encoding="utf-8")
+    if re.search(r"<sup>\d{3,}</sup>", text):
+        raise SystemExit(f"Wide verse number missing class in {path}")
     if 'class="verse-line"' in text and '</span><br/><span class="verse-line"' in text:
         raise SystemExit(f"Unexpected blank-line br between verse lines in {path}")
     if 'class="page-nav paged-nav"' in text:

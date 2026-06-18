@@ -234,6 +234,11 @@ em,
   vertical-align: baseline;
 }
 
+.verse-line > sup.wide-verse-number {
+  width: 2.65em;
+  padding-right: 0.35em;
+}
+
 .verse-line > span {
   display: table-cell;
   width: auto;
