@@ -459,6 +459,131 @@ def html_children(container: Tag) -> str:
     return "\n".join(str(child) for child in container.contents if not isinstance(child, Comment)).strip()
 
 
+INITIAL_HEADING_KEYS = {
+    "thanh thi",
+    "thanh ca tin mung",
+    "loi chua",
+    "loi cau",
+    "loi nguyen",
+}
+
+
+def add_initial_to_node(node: Tag) -> bool:
+    if node.select_one(".illuminated-initial"):
+        return False
+
+    for descendant in node.descendants:
+        if not isinstance(descendant, NavigableString):
+            continue
+        parent = descendant.parent
+        if not isinstance(parent, Tag):
+            continue
+        if parent.name in {"sup", "script", "style"}:
+            continue
+        if parent.find_parent(["sup", "script", "style"]):
+            continue
+        text = str(descendant)
+        match = re.search(r"\S", text)
+        if not match:
+            continue
+        index = match.start()
+        initial = text[index]
+        soup = BeautifulSoup("", "lxml")
+        initial_tag = soup.new_tag("span")
+        initial_tag["class"] = ["illuminated-initial"]
+        initial_tag.string = initial
+        replacement: list[NavigableString | Tag] = []
+        if index:
+            replacement.append(NavigableString(text[:index]))
+        replacement.append(initial_tag)
+        if index + 1 < len(text):
+            replacement.append(NavigableString(text[index + 1 :]))
+        descendant.replace_with(*replacement)
+        return True
+    return False
+
+
+def add_illuminated_initials(fragment: str) -> str:
+    soup = fragment_soup(fragment)
+    wrapper = soup.find("div")
+    if not isinstance(wrapper, Tag):
+        return fragment
+
+    current_section = ""
+    pending_after_heading = False
+    pending_after_antiphon = False
+    pending_after_reading_intro = False
+    previous_was_content = False
+
+    def is_content_block(node: Tag) -> bool:
+        if node.name not in {"p", "div"}:
+            return False
+        if node.name == "div" and node.find(["p", "h2", "h3", "div"], recursive=False):
+            return False
+        classes = set(node.get("class", []))
+        if classes & {"antiphon", "label", "note", "indexing", "right-indexing", "section", "title"}:
+            return False
+        text = node.get_text(" ", strip=True)
+        if not text:
+            return False
+        return bool(node.select_one(".verse-line, .verse-continuation") or node.name == "p")
+
+    for node in wrapper.find_all(["h2", "h3", "p", "div"], recursive=True):
+        if node.find_parent(["p", "h2", "h3"]):
+            continue
+        classes = set(node.get("class", []))
+        text = node.get_text(" ", strip=True)
+        key = normalize_key(text)
+
+        if node.name in {"h2", "h3"}:
+            current_section = key
+            pending_after_heading = key in INITIAL_HEADING_KEYS
+            pending_after_antiphon = False
+            pending_after_reading_intro = False
+            previous_was_content = False
+            continue
+
+        if "antiphon" in classes:
+            pending_after_antiphon = not previous_was_content
+            pending_after_heading = False
+            pending_after_reading_intro = False
+            previous_was_content = False
+            continue
+
+        if "note" in classes and key.startswith("trich "):
+            pending_after_reading_intro = True
+            pending_after_heading = False
+            pending_after_antiphon = False
+            previous_was_content = False
+            continue
+
+        if current_section in {"giao dau", "ket thuc"} and node.name == "p":
+            pre = node.find(class_="pre", recursive=False)
+            body = node.find(class_="body", recursive=False)
+            if (
+                isinstance(pre, Tag)
+                and isinstance(body, Tag)
+                and normalize_key(pre.get_text(" ", strip=True)).startswith("chu su")
+            ):
+                add_initial_to_node(body)
+                previous_was_content = True
+                continue
+
+        if pending_after_heading or pending_after_antiphon or pending_after_reading_intro:
+            if is_content_block(node):
+                add_initial_to_node(node)
+                pending_after_heading = False
+                pending_after_antiphon = False
+                pending_after_reading_intro = False
+                previous_was_content = True
+            continue
+
+        if is_content_block(node):
+            previous_was_content = True
+
+    return html_children(wrapper)
+
+
 def render_intro_html(source: str, prayer_data: dict, root_key: str) -> str:
     soup = BeautifulSoup(source, "lxml")
     wrapper = BeautifulSoup("<div></div>", "lxml").div
@@ -555,7 +680,7 @@ def render_dom_prayer(title: str, slug: str, source: str, payload: dict, root_ke
     if root_key in {"morning", "evening"}:
         body_parts.append(render_lay_ending_html(source))
     body = "\n".join(part for part in body_parts if part)
-    return Prayer(title, slug, body)
+    return Prayer(title, slug, add_illuminated_initials(body))
 
 
 def extract_liturgical_day(payloads: list[dict]) -> LiturgicalDay | None:
@@ -815,7 +940,8 @@ def render_api_prayer(title: str, slug: str, payload: dict, root_key: str) -> Pr
         add_html(lines, "ĐC", first_invitatory.get("antiphon"))
 
     render_data_dict(lines, root)
-    return Prayer(title, slug, render_line_groups(trim_blank_lines(lines)))
+    body = render_line_groups(trim_blank_lines(lines))
+    return Prayer(title, slug, add_illuminated_initials(body))
 
 
 def filter_night_dom(night: Tag, payload: dict) -> Tag:
@@ -885,7 +1011,8 @@ def render_night_prayer(title: str, slug: str, source: str, payload: dict) -> Pr
     sanitize_render_dom(night)
     post_process_render_dom(night)
     intro = render_intro_html(source, {"night": {}}, "night")
-    return Prayer(title, slug, intro + "\n" + html_children(night))
+    body = intro + "\n" + html_children(night)
+    return Prayer(title, slug, add_illuminated_initials(body))
 
 
 def write_payload_debug(name: str, payload: dict) -> None:
@@ -1010,7 +1137,8 @@ def find_explicit_sections(root: Tag) -> list[Prayer] | None:
         used.add(id(match))
         lines = collect_lines(match)
         if lines:
-            found.append(Prayer(title, slug, render_line_groups(lines)))
+            body = render_line_groups(lines)
+            found.append(Prayer(title, slug, add_illuminated_initials(body)))
 
     if len(found) == len(PRAYERS):
         logging.info("Split prayers using explicit DOM attributes")
@@ -1061,7 +1189,8 @@ def split_by_markers(lines: list[str]) -> list[Prayer] | None:
     for order_index, (prayer_index, start) in enumerate(ordered):
         end = ordered[order_index + 1][1] if order_index + 1 < len(ordered) else len(lines)
         title, slug = PRAYERS[prayer_index]
-        prayers.append(Prayer(title, slug, render_line_groups(trim_blank_lines(lines[start:end]))))
+        body = render_line_groups(trim_blank_lines(lines[start:end]))
+        prayers.append(Prayer(title, slug, add_illuminated_initials(body)))
 
     prayers.sort(key=lambda prayer: [slug for _, slug in PRAYERS].index(prayer.slug))
     logging.warning("Using fallback split by heading/text markers")

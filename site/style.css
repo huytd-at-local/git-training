@@ -219,35 +219,36 @@ em,
 }
 
 .verse-line {
-  display: table;
+  display: block;
   width: 100%;
-  table-layout: fixed;
   margin: 0 0 0.2em 0;
 }
 
 .verse-line > sup {
-  display: table-cell;
-  width: 1.8em;
-  padding-right: 0.25em;
-  margin-right: 0;
-  text-align: left;
-  vertical-align: baseline;
+  display: none;
 }
 
 .verse-line > sup.wide-verse-number {
-  width: 2.65em;
-  padding-right: 0.35em;
+  display: none;
 }
 
 .verse-line > span {
-  display: table-cell;
-  width: auto;
-  vertical-align: top;
+  display: block;
 }
 
 .verse-continuation {
   display: block;
-  margin: 0 0 0.2em 1.8em;
+  margin: 0 0 0.2em 0;
+}
+
+.illuminated-initial {
+  color: #8a1111;
+  display: inline-block;
+  font-size: 1.48em;
+  font-weight: bold;
+  line-height: 0.78;
+  margin-right: 0.03em;
+  vertical-align: -0.06em;
 }
 
 .error {

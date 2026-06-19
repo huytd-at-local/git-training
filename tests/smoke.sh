@@ -40,6 +40,12 @@ grep -q 'Tv 94 (95)' site/kinh-sang*.html
 grep -q 'class="verse-line"' site/kinh-sang*.html
 grep -q 'class="verse-line"' site/kinh-toi*.html
 grep -q 'wide-verse-number' site/style.css
+grep -q '.verse-line > sup' site/style.css
+grep -q 'display: none;' site/style.css
+grep -q 'illuminated-initial' site/style.css
+grep -q 'class="illuminated-initial"' site/kinh-sang*.html
+grep -q 'class="illuminated-initial"' site/kinh-chieu*.html
+grep -q 'class="illuminated-initial"' site/kinh-sach*.html
 grep -q '.antiphon .pre' site/style.css
 grep -q 'window.location.replace' site/index.html
 grep -q 'getUTCHours' site/index.html
@@ -48,8 +54,6 @@ grep -q 'class="date-nav"' site/index.html
 ! grep -q 'class="date-nav"' site/kinh-sang.html
 ! grep -q 'class="page-count"' site/kinh-sang.html
 ! grep -q 'class="reading-ref"' site/*.html
-grep -q 'Xin Thiên Chúa toàn năng' site/kinh-sang*.html
-grep -q 'Xin Thiên Chúa toàn năng' site/kinh-chieu*.html
 ! grep -Eq '<span class="pre">(Chủ sự|Cộng đoàn|ĐC|X|Đ)</span>' site/*.html
 ! grep -q 'Ha-lê-lui-a. Ha-lê-lui-a. Ha-lê-lui-a' site/kinh-toi*.html
 
@@ -60,19 +64,49 @@ fi
 "$PYTHON_BIN" - <<'PY'
 import re
 from pathlib import Path
-from scripts.fetch import block_units, html_blocks
+from bs4 import BeautifulSoup
+from scripts.fetch import block_units
 
 for path in Path("site").rglob("*.html"):
     text = path.read_text(encoding="utf-8")
+    soup = BeautifulSoup(text, "lxml")
     if re.search(r"<sup>\d{3,}</sup>", text):
         raise SystemExit(f"Wide verse number missing class in {path}")
     if 'class="verse-line"' in text and '</span><br/><span class="verse-line"' in text:
         raise SystemExit(f"Unexpected blank-line br between verse lines in {path}")
     if 'class="page-nav paged-nav"' in text:
-        page_body = text.split("</nav>", 1)[1].rsplit('<nav class="page-nav paged-nav">', 1)[0]
-        units = sum(block_units(block) for block in html_blocks(page_body))
+        main = soup.find("main")
+        if not main:
+            raise SystemExit(f"Missing main in {path}")
+        for nav in main.find_all("nav"):
+            nav.decompose()
+        units = sum(
+            block_units(str(child))
+            for child in main.find_all(["h1", "h2", "h3", "p", "div"], recursive=False)
+        )
         if units > 20:
             raise SystemExit(f"Page likely too long for Kindle viewport: {path} ({units} units)")
+
+required_initial_pages = [
+    Path("site/kinh-sang.html"),
+    Path("site/kinh-sang-6.html"),
+    Path("site/kinh-chieu-4.html"),
+    Path("site/kinh-chieu-17.html"),
+]
+for path in required_initial_pages:
+    if 'class="illuminated-initial"' not in path.read_text(encoding="utf-8"):
+        raise SystemExit(f"Missing illuminated initial in {path}")
+
+if 'class="illuminated-initial"' in Path("site/kinh-sang-2.html").read_text(encoding="utf-8"):
+    raise SystemExit("Unexpected repeated invitatory initial after repeated antiphon")
+
+for pattern in ("kinh-sang*.html", "kinh-chieu*.html"):
+    visible_text = "\n".join(
+        BeautifulSoup(path.read_text(encoding="utf-8"), "lxml").get_text("", strip=True)
+        for path in Path("site").glob(pattern)
+    )
+    if "Xin Thiên Chúa toàn năng" not in visible_text:
+        raise SystemExit(f"Missing visible blessing text in {pattern}")
 
 dated_indexes = sorted(Path("site").glob("20??-??-??/index.html"))
 if len(dated_indexes) < 3:
