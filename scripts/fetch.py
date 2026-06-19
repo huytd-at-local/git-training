@@ -521,6 +521,43 @@ def add_illuminated_initials(fragment: str) -> str:
     def starts_with_heading_key(key: str) -> bool:
         return any(key == heading_key or key.startswith(heading_key + " ") for heading_key in INITIAL_HEADING_KEYS)
 
+    def transform_role_line(node: Tag, section_key: str) -> tuple[Tag | None, bool]:
+        if node.name != "p":
+            return None, False
+        pre = node.find(class_="pre", recursive=False)
+        body = node.find(class_="body", recursive=False)
+        if not isinstance(pre, Tag) or not isinstance(body, Tag):
+            return None, False
+
+        label_key = normalize_key(pre.get_text(" ", strip=True).rstrip(":"))
+        prefix_response = False
+        if section_key in {"giao dau", "ket thuc"}:
+            if label_key == "chu su":
+                prefix_response = False
+            elif label_key == "cong doan":
+                prefix_response = True
+            else:
+                return None, False
+        elif section_key.startswith("xuong dap"):
+            if label_key == "x":
+                prefix_response = False
+            elif label_key == "d":
+                prefix_response = True
+            else:
+                return None, False
+        else:
+            return None, False
+
+        pre.decompose()
+        for child in list(node.contents):
+            if child is body:
+                break
+            if isinstance(child, NavigableString) and not str(child).strip():
+                child.extract()
+        if prefix_response and not body.get_text("", strip=True).startswith("—"):
+            body.insert(0, NavigableString("— "))
+        return body, True
+
     def is_content_block(node: Tag) -> bool:
         if node.name not in {"p", "div"}:
             return False
@@ -566,18 +603,14 @@ def add_illuminated_initials(fragment: str) -> str:
             last_structural_key = key
             continue
 
-        if current_section in {"giao dau", "ket thuc"} and node.name == "p":
-            pre = node.find(class_="pre", recursive=False)
-            body = node.find(class_="body", recursive=False)
-            if (
-                isinstance(pre, Tag)
-                and isinstance(body, Tag)
-                and normalize_key(pre.get_text(" ", strip=True)).startswith("chu su")
-            ):
+        transformed_body, role_transformed = transform_role_line(node, current_section)
+        if role_transformed:
+            if current_section in {"giao dau", "ket thuc"} and isinstance(transformed_body, Tag) and not transformed_body.get_text("", strip=True).startswith("—"):
+                body = transformed_body
                 add_initial_to_node(body)
-                previous_was_content = True
-                last_structural_key = ""
-                continue
+            previous_was_content = True
+            last_structural_key = ""
+            continue
 
         if pending_after_heading or pending_after_antiphon or pending_after_reading_intro:
             if is_content_block(node):

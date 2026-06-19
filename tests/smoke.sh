@@ -56,7 +56,8 @@ grep -q 'class="date-nav"' site/index.html
 ! grep -q 'class="date-nav"' site/kinh-sang.html
 ! grep -q 'class="page-count"' site/kinh-sang.html
 ! grep -q 'class="reading-ref"' site/*.html
-! grep -Eq '<span class="pre">(Chủ sự|Cộng đoàn|ĐC|X|Đ)</span>' site/*.html
+! grep -REq '<span class="pre">(Chủ sự|Cộng đoàn|X|Đ):?</span>' site
+grep -q '<span class="pre">ĐC:</span>' site/kinh-sang*.html
 ! grep -q 'Ha-lê-lui-a. Ha-lê-lui-a. Ha-lê-lui-a' site/kinh-toi*.html
 
 if test -f .cache/source.html && grep -Eq '<(em|i)([ >])' .cache/source.html; then
