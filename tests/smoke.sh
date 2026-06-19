@@ -46,6 +46,8 @@ grep -q 'illuminated-initial' site/style.css
 grep -q 'class="illuminated-initial"' site/kinh-sang*.html
 grep -q 'class="illuminated-initial"' site/kinh-chieu*.html
 grep -q 'class="illuminated-initial"' site/kinh-sach*.html
+grep -q 'p > .pre' site/style.css
+grep -q 'p > .body' site/style.css
 grep -q '.antiphon .pre' site/style.css
 grep -q 'window.location.replace' site/index.html
 grep -q 'getUTCHours' site/index.html
@@ -100,6 +102,41 @@ for path in required_initial_pages:
 if 'class="illuminated-initial"' in Path("site/kinh-sang-2.html").read_text(encoding="utf-8"):
     raise SystemExit("Unexpected repeated invitatory initial after repeated antiphon")
 
+def require_initial_after_heading(pattern: str, heading_prefix: str, skip_classes=()):
+    for path in Path("site").glob(pattern):
+        soup = BeautifulSoup(path.read_text(encoding="utf-8"), "lxml")
+        for heading in soup.find_all(["h2", "h3"]):
+            if not heading.get_text(" ", strip=True).startswith(heading_prefix):
+                continue
+            node = heading.find_next_sibling()
+            while node is not None:
+                classes = set(node.get("class", [])) if hasattr(node, "get") else set()
+                if classes & set(skip_classes):
+                    node = node.find_next_sibling()
+                    continue
+                if getattr(node, "name", None) in {"p", "div"} and node.get_text(" ", strip=True):
+                    if not node.select_one(".illuminated-initial"):
+                        raise SystemExit(f"Missing illuminated initial after {heading_prefix} in {path}")
+                    return
+                node = node.find_next_sibling()
+    raise SystemExit(f"Could not find heading: {heading_prefix} in {pattern}")
+
+require_initial_after_heading("kinh-sang*.html", "Lời Chúa")
+
+found_marian_canticle = False
+for path in Path("site").glob("kinh-toi*.html"):
+    soup = BeautifulSoup(path.read_text(encoding="utf-8"), "lxml")
+    for title in soup.find_all(class_="title"):
+        if not any(name in title.get_text(" ", strip=True) for name in ("Salve Regina", "Ave Regina", "Sub tuum", "Regina caeli")):
+            continue
+        first_body = title.find_next_sibling("p")
+        if not first_body or not first_body.select_one(".illuminated-initial"):
+            raise SystemExit(f"Missing illuminated initial in Marian canticle in {path}")
+        found_marian_canticle = True
+        break
+if not found_marian_canticle:
+    raise SystemExit("Could not find Marian canticle title in Kinh Tối")
+
 for pattern in ("kinh-sang*.html", "kinh-chieu*.html"):
     visible_text = "\n".join(
         BeautifulSoup(path.read_text(encoding="utf-8"), "lxml").get_text("", strip=True)
@@ -107,6 +144,15 @@ for pattern in ("kinh-sang*.html", "kinh-chieu*.html"):
     )
     if "Xin Thiên Chúa toàn năng" not in visible_text:
         raise SystemExit(f"Missing visible blessing text in {pattern}")
+
+if Path("build/kinh-sach.json").exists():
+    import json
+
+    payload = json.loads(Path("build/kinh-sach.json").read_text(encoding="utf-8"))
+    if not payload.get("tedeum"):
+        office_html = "\n".join(path.read_text(encoding="utf-8") for path in Path("site").glob("kinh-sach*.html"))
+        if "Te Deum" in office_html or "Thánh thi “Lạy Thiên Chúa”" in office_html:
+            raise SystemExit("Te Deum rendered even though source payload disables it")
 
 dated_indexes = sorted(Path("site").glob("20??-??-??/index.html"))
 if len(dated_indexes) < 3:

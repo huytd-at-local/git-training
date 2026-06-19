@@ -208,6 +208,15 @@ em,
   font-weight: bold;
 }
 
+p > .pre {
+  display: block;
+  font-weight: bold;
+}
+
+p > .body {
+  display: block;
+}
+
 .indexing,
 .title,
 .right-indexing {

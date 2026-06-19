@@ -462,9 +462,11 @@ def html_children(container: Tag) -> str:
 INITIAL_HEADING_KEYS = {
     "thanh thi",
     "thanh ca tin mung",
+    "ca van kinh duc me",
     "loi chua",
     "loi cau",
     "loi nguyen",
+    "thanh thi lay thien chua",
 }
 
 
@@ -514,6 +516,10 @@ def add_illuminated_initials(fragment: str) -> str:
     pending_after_antiphon = False
     pending_after_reading_intro = False
     previous_was_content = False
+    last_structural_key = ""
+
+    def starts_with_heading_key(key: str) -> bool:
+        return any(key == heading_key or key.startswith(heading_key + " ") for heading_key in INITIAL_HEADING_KEYS)
 
     def is_content_block(node: Tag) -> bool:
         if node.name not in {"p", "div"}:
@@ -537,17 +543,19 @@ def add_illuminated_initials(fragment: str) -> str:
 
         if node.name in {"h2", "h3"}:
             current_section = key
-            pending_after_heading = key in INITIAL_HEADING_KEYS
+            pending_after_heading = starts_with_heading_key(key)
             pending_after_antiphon = False
             pending_after_reading_intro = False
             previous_was_content = False
+            last_structural_key = key
             continue
 
         if "antiphon" in classes:
-            pending_after_antiphon = not previous_was_content
+            pending_after_antiphon = not previous_was_content or last_structural_key.startswith("tv 94")
             pending_after_heading = False
             pending_after_reading_intro = False
             previous_was_content = False
+            last_structural_key = ""
             continue
 
         if "note" in classes and key.startswith("trich "):
@@ -555,6 +563,7 @@ def add_illuminated_initials(fragment: str) -> str:
             pending_after_heading = False
             pending_after_antiphon = False
             previous_was_content = False
+            last_structural_key = key
             continue
 
         if current_section in {"giao dau", "ket thuc"} and node.name == "p":
@@ -567,6 +576,7 @@ def add_illuminated_initials(fragment: str) -> str:
             ):
                 add_initial_to_node(body)
                 previous_was_content = True
+                last_structural_key = ""
                 continue
 
         if pending_after_heading or pending_after_antiphon or pending_after_reading_intro:
@@ -576,10 +586,16 @@ def add_illuminated_initials(fragment: str) -> str:
                 pending_after_antiphon = False
                 pending_after_reading_intro = False
                 previous_was_content = True
+                last_structural_key = ""
             continue
 
         if is_content_block(node):
             previous_was_content = True
+            last_structural_key = ""
+            continue
+
+        if classes & {"indexing", "right-indexing", "section", "title"}:
+            last_structural_key = key
 
     return html_children(wrapper)
 
@@ -674,6 +690,15 @@ def render_dom_prayer(title: str, slug: str, source: str, payload: dict, root_ke
     if isinstance(root, dict) and ci_get(root, "feast_hide"):
         for tag in list(normal.select(".feast-hide")):
             tag.decompose()
+    if root_key == "office" and not prayer_data.get("tedeum"):
+        for heading in list(normal.find_all(["h2", "h3", "h4"])):
+            if "te deum" not in normalize_key(heading.get_text(" ", strip=True)):
+                continue
+            division = heading.find_parent(class_="division")
+            if isinstance(division, Tag):
+                division.decompose()
+            else:
+                heading.decompose()
     sanitize_render_dom(normal)
     post_process_render_dom(normal)
     body_parts = [render_intro_html(source, prayer_data, root_key), html_children(normal)]
