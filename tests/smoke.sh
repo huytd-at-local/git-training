@@ -33,8 +33,6 @@ for page in $pages; do
   ! grep -q 'play.google.com' "$file"
 done
 
-grep -q 'Ca vịnh' site/kinh-chieu*.html
-grep -q 'Ca vịnh' site/kinh-sang*.html
 grep -q 'Tv 94 (95)' site/kinh-sang*.html
 ! grep -q 'Tv 94 (95)' site/kinh-sach.html
 grep -q 'class="verse-line"' site/kinh-sang*.html
@@ -57,6 +55,9 @@ grep -q 'class="date-nav"' site/index.html
 ! grep -q 'class="page-count"' site/kinh-sang.html
 ! grep -q 'class="reading-ref"' site/*.html
 ! grep -REq '<span class="pre">(Chủ sự|Cộng đoàn|X|Đ):?</span>' site
+! grep -REq 'division-header' site
+! grep -REq '<h2[^>]*>[[:space:]]*Xướng đáp' site
+grep -REq '<span class="body"><span class="illuminated-initial">[^<]</span>' site/kinh-toi*.html
 grep -q '<span class="pre">ĐC:</span>' site/kinh-sang*.html
 ! grep -q 'Ha-lê-lui-a. Ha-lê-lui-a. Ha-lê-lui-a' site/kinh-toi*.html
 
@@ -94,7 +95,7 @@ required_initial_pages = [
     Path("site/kinh-sang.html"),
     Path("site/kinh-sang-6.html"),
     Path("site/kinh-chieu-4.html"),
-    Path("site/kinh-chieu-17.html"),
+    Path("site/kinh-chieu-16.html"),
 ]
 for path in required_initial_pages:
     if 'class="illuminated-initial"' not in path.read_text(encoding="utf-8"):
@@ -102,27 +103,6 @@ for path in required_initial_pages:
 
 if 'class="illuminated-initial"' in Path("site/kinh-sang-2.html").read_text(encoding="utf-8"):
     raise SystemExit("Unexpected repeated invitatory initial after repeated antiphon")
-
-def require_initial_after_heading(pattern: str, heading_prefix: str, skip_classes=()):
-    for path in Path("site").glob(pattern):
-        soup = BeautifulSoup(path.read_text(encoding="utf-8"), "lxml")
-        for heading in soup.find_all(["h2", "h3"]):
-            if not heading.get_text(" ", strip=True).startswith(heading_prefix):
-                continue
-            node = heading.find_next_sibling()
-            while node is not None:
-                classes = set(node.get("class", [])) if hasattr(node, "get") else set()
-                if classes & set(skip_classes):
-                    node = node.find_next_sibling()
-                    continue
-                if getattr(node, "name", None) in {"p", "div"} and node.get_text(" ", strip=True):
-                    if not node.select_one(".illuminated-initial"):
-                        raise SystemExit(f"Missing illuminated initial after {heading_prefix} in {path}")
-                    return
-                node = node.find_next_sibling()
-    raise SystemExit(f"Could not find heading: {heading_prefix} in {pattern}")
-
-require_initial_after_heading("kinh-sang*.html", "Lời Chúa")
 
 found_marian_canticle = False
 for path in Path("site").glob("kinh-toi*.html"):
