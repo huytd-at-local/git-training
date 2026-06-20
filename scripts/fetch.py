@@ -467,6 +467,7 @@ INITIAL_HEADING_KEYS = {
     "loi cau",
     "loi nguyen",
     "thanh thi lay thien chua",
+    "xuong dap",
 }
 
 
@@ -605,6 +606,8 @@ def add_illuminated_initials(fragment: str) -> str:
 
         transformed_body, role_transformed = transform_role_line(node, current_section)
         if role_transformed:
+            if current_section.startswith("xuong dap") and not previous_was_content and isinstance(transformed_body, Tag):
+                add_initial_to_node(transformed_body)
             if current_section in {"giao dau", "ket thuc"} and isinstance(transformed_body, Tag) and not transformed_body.get_text("", strip=True).startswith("—"):
                 body = transformed_body
                 add_initial_to_node(body)

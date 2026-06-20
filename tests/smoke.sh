@@ -104,11 +104,21 @@ if 'class="illuminated-initial"' in Path("site/kinh-sang-2.html").read_text(enco
     raise SystemExit("Unexpected repeated invitatory initial after repeated antiphon")
 
 def require_initial_after_heading(pattern: str, heading_prefix: str, skip_classes=()):
+    def page_key(path: Path):
+        if "-" in path.stem and path.stem.rsplit("-", 1)[1].isdigit():
+            base, number = path.stem.rsplit("-", 1)
+            return path.parent, base, int(number)
+        return path.parent, path.stem, 1
+
+    page_map = {page_key(path): path for path in Path("site").glob(pattern)}
+    found = 0
     for path in Path("site").glob(pattern):
+        parent, base, number = page_key(path)
         soup = BeautifulSoup(path.read_text(encoding="utf-8"), "lxml")
         for heading in soup.find_all(["h2", "h3"]):
             if not heading.get_text(" ", strip=True).startswith(heading_prefix):
                 continue
+            found += 1
             node = heading.find_next_sibling()
             while node is not None:
                 classes = set(node.get("class", [])) if hasattr(node, "get") else set()
@@ -118,11 +128,31 @@ def require_initial_after_heading(pattern: str, heading_prefix: str, skip_classe
                 if getattr(node, "name", None) in {"p", "div"} and node.get_text(" ", strip=True):
                     if not node.select_one(".illuminated-initial"):
                         raise SystemExit(f"Missing illuminated initial after {heading_prefix} in {path}")
-                    return
+                    break
                 node = node.find_next_sibling()
-    raise SystemExit(f"Could not find heading: {heading_prefix} in {pattern}")
+            else:
+                next_path = page_map.get((parent, base, number + 1))
+                if next_path:
+                    next_soup = BeautifulSoup(next_path.read_text(encoding="utf-8"), "lxml")
+                    for candidate in next_soup.find_all(["p", "div"], recursive=True):
+                        if candidate.find_parent(["p", "h2", "h3"]):
+                            continue
+                        classes = set(candidate.get("class", [])) if hasattr(candidate, "get") else set()
+                        if "updated" in classes:
+                            continue
+                        if candidate.get_text(" ", strip=True):
+                            if not candidate.select_one(".illuminated-initial"):
+                                raise SystemExit(f"Missing illuminated initial after {heading_prefix} in {next_path}")
+                            break
+                    else:
+                        raise SystemExit(f"Could not find body after {heading_prefix} in {path}")
+                else:
+                    raise SystemExit(f"Could not find body after {heading_prefix} in {path}")
+    if not found:
+        raise SystemExit(f"Could not find heading: {heading_prefix} in {pattern}")
 
 require_initial_after_heading("kinh-sang*.html", "Lời Chúa")
+require_initial_after_heading("kinh-*.html", "Xướng đáp")
 
 found_marian_canticle = False
 for path in Path("site").glob("kinh-toi*.html"):
