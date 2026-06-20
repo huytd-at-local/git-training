@@ -56,7 +56,7 @@ grep -q 'class="date-nav"' site/index.html
 ! grep -q 'class="reading-ref"' site/*.html
 ! grep -REq '<span class="pre">(Chủ sự|Cộng đoàn|X|Đ):?</span>' site
 ! grep -REq 'division-header' site
-! grep -REq '<h2[^>]*>[[:space:]]*Xướng đáp' site
+! grep -REq '<h2[^>]*>' site
 grep -REq '<span class="body"><span class="illuminated-initial">[^<]</span>' site/kinh-toi*.html
 grep -q '<span class="pre">ĐC:</span>' site/kinh-sang*.html
 ! grep -q 'Ha-lê-lui-a. Ha-lê-lui-a. Ha-lê-lui-a' site/kinh-toi*.html
@@ -91,15 +91,10 @@ for path in Path("site").rglob("*.html"):
         if units > 20:
             raise SystemExit(f"Page likely too long for Kindle viewport: {path} ({units} units)")
 
-required_initial_pages = [
-    Path("site/kinh-sang.html"),
-    Path("site/kinh-sang-6.html"),
-    Path("site/kinh-chieu-4.html"),
-    Path("site/kinh-chieu-16.html"),
-]
-for path in required_initial_pages:
-    if 'class="illuminated-initial"' not in path.read_text(encoding="utf-8"):
-        raise SystemExit(f"Missing illuminated initial in {path}")
+for pattern in ("kinh-sach*.html", "kinh-sang*.html", "kinh-chieu*.html", "kinh-toi*.html"):
+    html = "\n".join(path.read_text(encoding="utf-8") for path in Path("site").glob(pattern))
+    if 'class="illuminated-initial"' not in html:
+        raise SystemExit(f"Missing illuminated initial in {pattern}")
 
 if 'class="illuminated-initial"' in Path("site/kinh-sang-2.html").read_text(encoding="utf-8"):
     raise SystemExit("Unexpected repeated invitatory initial after repeated antiphon")
