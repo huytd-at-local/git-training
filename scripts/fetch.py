@@ -467,7 +467,6 @@ INITIAL_HEADING_KEYS = {
     "loi cau",
     "loi nguyen",
     "thanh thi lay thien chua",
-    "xuong dap",
 }
 
 
@@ -606,8 +605,6 @@ def add_illuminated_initials(fragment: str) -> str:
 
         transformed_body, role_transformed = transform_role_line(node, current_section)
         if role_transformed:
-            if current_section.startswith("xuong dap") and not previous_was_content and isinstance(transformed_body, Tag):
-                add_initial_to_node(transformed_body)
             if current_section in {"giao dau", "ket thuc"} and isinstance(transformed_body, Tag) and not transformed_body.get_text("", strip=True).startswith("—"):
                 body = transformed_body
                 add_initial_to_node(body)
@@ -633,15 +630,15 @@ def add_illuminated_initials(fragment: str) -> str:
         if classes & {"indexing", "right-indexing", "section", "title"}:
             last_structural_key = key
 
-    for heading in list(wrapper.select("h2.division-header")):
-        heading.decompose()
-
     return html_children(wrapper)
 
 
 def render_intro_html(source: str, prayer_data: dict, root_key: str) -> str:
     soup = BeautifulSoup(source, "lxml")
     wrapper = BeautifulSoup("<div></div>", "lxml").div
+    heading = soup.new_tag("h2")
+    heading.string = "Giáo đầu"
+    wrapper.append(heading)
 
     if root_key in {"office", "morning"} and isinstance(prayer_data.get("first_invitatory"), dict):
         intro = soup.find(id="firstInvitatory")
@@ -991,6 +988,7 @@ def render_api_prayer(title: str, slug: str, payload: dict, root_key: str) -> Pr
         lines.extend(
             [
                 "",
+                "Giáo đầu",
                 "Chủ sự",
                 "Lạy Chúa Trời, xin mở miệng con,",
                 "Cộng đoàn",
@@ -1300,7 +1298,7 @@ def is_heading(line: str) -> bool:
 def line_to_html(line: str) -> str:
     escaped = html.escape(line, quote=True)
     if is_heading(line):
-        return f'<div class="section-heading">{escaped}</div>'
+        return f'<h2>{escaped}</h2>'
     if is_label(line):
         return f'<p class="label"><strong>{escaped}</strong></p>'
     return f"<div>{escaped}</div>"
