@@ -1368,9 +1368,11 @@ def page_shell(
     css_href: str = "style.css",
     extra_head: str = "",
     bottom_nav: str | None = None,
+    body_class: str = "",
 ) -> str:
     escaped_title = html.escape(title, quote=True)
     escaped_css_href = html.escape(css_href, quote=True)
+    body_class_attr = f' class="{html.escape(body_class, quote=True)}"' if body_class else ""
     feast_html = liturgical_day_html(liturgical_day) if show_metadata else ""
     metadata_html = (
         f'    <p class="updated">Cập nhật: {html.escape(updated)}</p>\n'
@@ -1389,7 +1391,7 @@ def page_shell(
   <link rel="stylesheet" href="{escaped_css_href}">
 {extra_head}
 </head>
-<body>
+<body{body_class_attr}>
   <main>
     {nav}
 {title_html}{metadata_html}{page_note_html}
@@ -1425,6 +1427,10 @@ def prayer_page_filename(slug: str, page_number: int) -> str:
     return f"{slug}.html" if page_number == 1 else f"{slug}-{page_number}.html"
 
 
+def responsive_prayer_filename(slug: str) -> str:
+    return f"{slug}-responsive.html"
+
+
 def date_dir_name(date: datetime) -> str:
     return date.strftime("%Y-%m-%d")
 
@@ -1444,11 +1450,20 @@ def date_nav_html(
     available_dates: list[datetime],
     from_dir: str,
     slug: str = "index",
+    responsive: bool = False,
 ) -> str:
     items: list[str] = []
     for date in available_dates:
         label = f"{date.day}/{date.month}"
-        href = relative_day_href(from_dir, date, slug)
+        if responsive and slug == "index":
+            href = f"{date_dir_name(date)}/index-responsive.html"
+            href = f"../{href}" if from_dir else href
+        elif responsive:
+            filename = responsive_prayer_filename(slug)
+            href = f"{date_dir_name(date)}/{filename}"
+            href = f"../{href}" if from_dir else href
+        else:
+            href = relative_day_href(from_dir, date, slug)
         cls = ' class="active"' if date.date() == current_date.date() else ""
         items.append(f'<a{cls} href="{href}">{html.escape(label)}</a>')
     return '<nav class="date-nav">' + "".join(items) + "</nav>"
@@ -1781,6 +1796,30 @@ def page_nav_html(
     )
 
 
+def responsive_page_nav_html(
+    previous_prayer: Prayer | None,
+    next_prayer: Prayer | None,
+    index_href: str = "index-responsive.html",
+) -> str:
+    previous_item = (
+        f'<a class="nav-icon" href="{responsive_prayer_filename(previous_prayer.slug)}">&#9664;</a>'
+        if previous_prayer
+        else '<span class="nav-icon">&#9664;</span>'
+    )
+    next_item = (
+        f'<a class="nav-icon" href="{responsive_prayer_filename(next_prayer.slug)}">&#9654;</a>'
+        if next_prayer
+        else '<span class="nav-icon">&#9654;</span>'
+    )
+    return (
+        '<nav class="page-nav responsive-nav">'
+        f"{previous_item}"
+        f'<a class="nav-index" href="{index_href}">Mục lục</a>'
+        f"{next_item}"
+        "</nav>"
+    )
+
+
 def write_day_site(
     target_dir: Path,
     css_href: str,
@@ -1805,6 +1844,8 @@ def write_day_site(
     {index_items}
   </ul>
 </section>
+<p class="kindle-note">Phiên bản này dành cho trình duyệt web tối giản của Kindle.</p>
+<p class="mode-switch"><a href="index-responsive.html">Mở bản responsive</a></p>
 """
     (target_dir / "index.html").write_text(
         page_shell(
@@ -1821,6 +1862,50 @@ def write_day_site(
 
     prayer_by_slug = {prayer.slug: prayer for prayer in prayers}
     ordered = [prayer_by_slug[slug] for _, slug in PRAYERS]
+    responsive_index_items = "\n".join(
+        f'<li><a href="{responsive_prayer_filename(slug)}">{html.escape(title)}</a></li>' for title, slug in PRAYERS
+    )
+    responsive_index_body = f"""
+{date_nav_html(date, available_dates, from_dir, responsive=True)}
+<section class="home-list">
+  <ul>
+    {responsive_index_items}
+  </ul>
+</section>
+<p class="mode-switch"><a href="index.html">Trở về bản Kindle</a></p>
+"""
+    (target_dir / "index-responsive.html").write_text(
+        page_shell(
+            "Các Giờ Kinh Phụng Vụ",
+            responsive_index_body,
+            updated,
+            "",
+            liturgical_day,
+            css_href=css_href,
+            bottom_nav="",
+            body_class="responsive-page responsive-index",
+        ),
+        encoding="utf-8",
+    )
+
+    for index, prayer in enumerate(ordered):
+        previous_prayer = ordered[index - 1] if index > 0 else None
+        next_prayer = ordered[index + 1] if index + 1 < len(ordered) else None
+        nav = responsive_page_nav_html(previous_prayer, next_prayer)
+        (target_dir / responsive_prayer_filename(prayer.slug)).write_text(
+            page_shell(
+                prayer.title,
+                prayer.body_html,
+                updated,
+                "",
+                liturgical_day,
+                css_href=css_href,
+                bottom_nav=nav,
+                body_class="responsive-page responsive-prayer",
+            ),
+            encoding="utf-8",
+        )
+
     paginated = {prayer.slug: paginate_html(prayer.body_html) for prayer in ordered}
     for index, prayer in enumerate(ordered):
         pages = paginated[prayer.slug]

@@ -180,10 +180,59 @@ if Path("build/kinh-sach.json").exists():
     import json
 
     payload = json.loads(Path("build/kinh-sach.json").read_text(encoding="utf-8"))
-    if not payload.get("tedeum"):
+    prayer_items = payload.get("prayer")
+    prayer_payload = prayer_items[0] if isinstance(prayer_items, list) and prayer_items else {}
+    if not prayer_payload.get("tedeum"):
         office_html = "\n".join(path.read_text(encoding="utf-8") for path in Path("site").glob("kinh-sach*.html"))
         if "Te Deum" in office_html or "Thánh thi “Lạy Thiên Chúa”" in office_html:
             raise SystemExit("Te Deum rendered even though source payload disables it")
+
+responsive_index = Path("site/index-responsive.html")
+if not responsive_index.exists():
+    raise SystemExit("Missing responsive index")
+responsive_index_html = responsive_index.read_text(encoding="utf-8")
+if 'class="responsive-page responsive-index"' not in responsive_index_html:
+    raise SystemExit("Responsive index missing responsive body class")
+if "Trở về bản Kindle" not in responsive_index_html:
+    raise SystemExit("Responsive index missing Kindle return link")
+if "kinh-sang-responsive.html" not in responsive_index_html:
+    raise SystemExit("Responsive index missing responsive prayer links")
+
+kindle_index_html = Path("site/index.html").read_text(encoding="utf-8")
+if "Phiên bản này dành cho trình duyệt web tối giản của Kindle" not in kindle_index_html:
+    raise SystemExit("Kindle index missing explanatory note")
+if "index-responsive.html" not in kindle_index_html:
+    raise SystemExit("Kindle index missing responsive link")
+if kindle_index_html.find('class="home-list"') > kindle_index_html.find('class="kindle-note"'):
+    raise SystemExit("Kindle index note should appear after prayer list")
+if kindle_index_html.find('class="home-list"') > kindle_index_html.find('class="mode-switch"'):
+    raise SystemExit("Kindle index mode switch should appear after prayer list")
+if responsive_index_html.find('class="home-list"') > responsive_index_html.find('class="mode-switch"'):
+    raise SystemExit("Responsive index mode switch should appear after prayer list")
+if ".responsive-page .note" not in Path("site/style.css").read_text(encoding="utf-8"):
+    raise SystemExit("Responsive note font rule missing")
+
+for title, slug in [
+    ("Kinh Sách", "kinh-sach"),
+    ("Kinh Sáng", "kinh-sang"),
+    ("Kinh Trưa - Giờ Ba", "kinh-trua-gio-ba"),
+    ("Kinh Trưa - Giờ Sáu", "kinh-trua-gio-sau"),
+    ("Kinh Trưa - Giờ Chín", "kinh-trua-gio-chin"),
+    ("Kinh Chiều", "kinh-chieu"),
+    ("Kinh Tối", "kinh-toi"),
+]:
+    path = Path(f"site/{slug}-responsive.html")
+    if not path.exists():
+        raise SystemExit(f"Missing responsive prayer page: {path}")
+    text = path.read_text(encoding="utf-8")
+    if 'class="responsive-page responsive-prayer"' not in text:
+        raise SystemExit(f"Responsive prayer missing body class: {path}")
+    if 'class="page-nav responsive-nav"' not in text:
+        raise SystemExit(f"Responsive prayer missing three-button nav: {path}")
+    if "Mục lục" not in text or "index-responsive.html" not in text:
+        raise SystemExit(f"Responsive prayer missing responsive index link: {path}")
+    if 'class="page-nav paged-nav"' in text or "Trang 2/" in text:
+        raise SystemExit(f"Responsive prayer should not be paginated: {path}")
 
 dated_indexes = sorted(Path("site").glob("20??-??-??/index.html"))
 if len(dated_indexes) < 3:

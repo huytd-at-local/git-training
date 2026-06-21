@@ -265,6 +265,167 @@ p > .body {
   padding-top: 18px;
 }
 
+.kindle-note {
+  margin: 0 0 18px 0;
+  text-align: center;
+  font-size: 32px;
+  line-height: 1.35;
+}
+
+.mode-switch {
+  margin: 0 0 20px 0;
+  text-align: center;
+}
+
+.mode-switch a {
+  display: inline-block;
+  padding: 16px 22px;
+  border: 2px solid #777;
+  font-weight: bold;
+  text-decoration: none;
+}
+
+.responsive-page {
+  padding: 18px 18px 26px 18px;
+  color: #171717;
+  background: #fbfaf7;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 21px;
+  line-height: 1.72;
+  font-weight: 400;
+}
+
+.responsive-page main {
+  width: min(100%, 760px);
+  margin: 0 auto;
+}
+
+.responsive-page h1 {
+  margin-bottom: 10px;
+  font-size: clamp(30px, 8vw, 48px);
+  line-height: 1.18;
+}
+
+.responsive-page h2 {
+  margin: 34px 0 12px 0;
+  font-size: clamp(25px, 6vw, 36px);
+  line-height: 1.25;
+}
+
+.responsive-page h3 {
+  margin: 26px 0 10px 0;
+  font-size: clamp(23px, 5vw, 31px);
+  line-height: 1.3;
+}
+
+.responsive-page p {
+  margin-bottom: 14px;
+}
+
+.responsive-page .note {
+  font-size: 0.9em;
+  line-height: 1.55;
+}
+
+.responsive-page .updated,
+.responsive-page .kindle-note,
+.responsive-page .feast-date,
+.responsive-page .feast-rank {
+  font-size: 17px;
+}
+
+.responsive-page .feast-title {
+  font-size: 22px;
+}
+
+.responsive-page .liturgical-day,
+.responsive-page .date-nav,
+.responsive-page .page-nav {
+  border-width: 1px;
+}
+
+.responsive-page .date-nav {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  font-size: 17px;
+}
+
+.responsive-page .date-nav a {
+  width: auto;
+  min-width: 82px;
+  margin: 0;
+  padding: 9px 12px;
+  border-width: 1px;
+  border-radius: 6px;
+}
+
+.responsive-page .home-list a {
+  margin-bottom: 10px;
+  padding: 16px 14px;
+  border: 1px solid #d7d0c5;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 22px;
+  line-height: 1.25;
+}
+
+.responsive-page .mode-switch a,
+.responsive-page .page-nav a,
+.responsive-page .page-nav span {
+  border-width: 1px;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.responsive-page .mode-switch a {
+  padding: 10px 16px;
+  font-size: 18px;
+}
+
+.responsive-page .responsive-nav {
+  display: grid;
+  grid-template-columns: minmax(54px, 1fr) minmax(120px, 1.5fr) minmax(54px, 1fr);
+  gap: 8px;
+  align-items: stretch;
+  margin-top: 34px;
+  padding-top: 16px;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.responsive-page .responsive-nav a,
+.responsive-page .responsive-nav span {
+  display: flex;
+  width: auto;
+  min-width: 0;
+  min-height: 48px;
+  margin: 0;
+  padding: 10px 8px;
+  align-items: center;
+  justify-content: center;
+}
+
+.responsive-page .responsive-nav .nav-icon {
+  font-size: 24px;
+}
+
+.responsive-page .responsive-nav .nav-index {
+  font-size: 17px;
+  font-weight: bold;
+}
+
+.responsive-page .stanza {
+  margin-bottom: 18px;
+}
+
+.responsive-page .label {
+  margin-top: 22px;
+}
+
+.responsive-page .illuminated-initial {
+  font-size: 1.42em;
+}
+
 code {
   font-family: "Courier New", monospace;
   font-size: 0.85em;
@@ -300,5 +461,33 @@ code {
   .paged-nav a,
   .paged-nav span {
     width: 18%;
+  }
+
+  .responsive-page {
+    padding: 16px 14px 24px 14px;
+    font-size: 20px;
+    line-height: 1.68;
+  }
+
+  .responsive-page h1 {
+    font-size: 31px;
+  }
+
+  .responsive-page h2 {
+    font-size: 25px;
+  }
+
+  .responsive-page .date-nav {
+    gap: 6px;
+  }
+
+  .responsive-page .date-nav a {
+    min-width: 0;
+    flex: 1 1 0;
+    padding: 8px 4px;
+  }
+
+  .responsive-page .home-list a {
+    font-size: 21px;
   }
 }
