@@ -248,10 +248,25 @@ if test -f build/kinh-toi.json; then
   "$PYTHON_BIN" - <<'PY'
 import json
 from pathlib import Path
+from bs4 import BeautifulSoup
 
 payload = json.loads(Path("build/kinh-toi.json").read_text(encoding="utf-8"))
 season = payload.get("date_info", {}).get("season")
 html = "\n".join(path.read_text(encoding="utf-8") for path in Path("site").glob("kinh-toi*.html"))
+visible_text = "\n".join(
+    BeautifulSoup(path.read_text(encoding="utf-8"), "lxml").get_text("", strip=True)
+    for path in Path("site").glob("kinh-toi*.html")
+)
+if season == "easter":
+    expected_hymn = "Ngôi Lời Thánh Phụ quang vinh"
+else:
+    day = int(payload.get("date_info", {}).get("today", {}).get("date", 0))
+    if day % 2 == 0:
+        expected_hymn = "Đêm tối xuống dần trên cõi thế"
+    else:
+        expected_hymn = "Muôn lạy Chúa Ki-tô Ánh Sáng"
+if expected_hymn not in visible_text:
+    raise SystemExit(f"Missing expected Kinh Tối hymn: {expected_hymn}")
 if season not in {"christmas", "easter"}:
     day = int(payload.get("date_info", {}).get("today", {}).get("date", 0))
     titles = [

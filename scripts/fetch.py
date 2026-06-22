@@ -1005,7 +1005,41 @@ def render_api_prayer(title: str, slug: str, payload: dict, root_key: str) -> Pr
     return Prayer(title, slug, add_illuminated_initials(body))
 
 
-def filter_night_dom(night: Tag, payload: dict) -> Tag:
+def selected_night_hymn_class(payload: dict, selection_day: int | None = None) -> str:
+    night_payload = payload.get("prayer", {}).get("night", {})
+    explicit = ""
+    if isinstance(night_payload, dict):
+        explicit = str(
+            night_payload.get("hymn_cd")
+            or night_payload.get("hymn_code")
+            or night_payload.get("hymn")
+            or ""
+        ).strip()
+    explicit = explicit.lower().removeprefix(".")
+    if explicit in {"1", "hymn1"}:
+        return "hymn1"
+    if explicit in {"2", "hymn2"}:
+        return "hymn2"
+    if explicit == "easter":
+        return "easter"
+
+    date_info = payload.get("date_info", {})
+    season = date_info.get("season") if isinstance(date_info, dict) else None
+    if season == "easter":
+        return "easter"
+
+    if selection_day is None:
+        today = date_info.get("today", {}) if isinstance(date_info, dict) else {}
+        try:
+            selection_day = int(today.get("date") or 0) if isinstance(today, dict) else 0
+        except (TypeError, ValueError):
+            selection_day = 0
+    if selection_day:
+        return f"hymn{(selection_day % 2) + 1}"
+    return "hymn1"
+
+
+def filter_night_dom(night: Tag, payload: dict, selection_day: int | None = None) -> Tag:
     night_payload = payload.get("prayer", {}).get("night", {})
     psalm_code = str(night_payload.get("code") or "")
     prayer_code = str(night_payload.get("prayer_cd") or "")
@@ -1056,19 +1090,21 @@ def filter_night_dom(night: Tag, payload: dict) -> Tag:
             if selected_exclamation not in classes:
                 tag.decompose()
 
-    for selector in (".hymn2",):
-        for tag in list(night.select(selector)):
+    selected_hymn = selected_night_hymn_class(payload, selection_day)
+    for tag in list(night.select(".hymn.division > .body")):
+        classes = set(tag.get("class", []))
+        if selected_hymn not in classes:
             tag.decompose()
 
     return night
 
 
-def render_night_prayer(title: str, slug: str, source: str, payload: dict) -> Prayer:
+def render_night_prayer(title: str, slug: str, source: str, payload: dict, date: datetime) -> Prayer:
     soup = BeautifulSoup(source, "lxml")
     night = soup.find(id="nightPrayer")
     if not isinstance(night, Tag):
         raise ValueError("Could not find #nightPrayer in source HTML")
-    night = filter_night_dom(night, payload)
+    night = filter_night_dom(night, payload, date.day)
     sanitize_render_dom(night)
     post_process_render_dom(night)
     intro = render_intro_html(source, {"night": {}}, "night")
@@ -1102,7 +1138,7 @@ def build_prayers_from_api(session: requests.Session, source: str, date: datetim
     night_payload = fetch_prayer_json(session, date, "nightPrayer")
     payloads.append(night_payload)
     write_payload_debug("kinh-toi", night_payload)
-    prayers.append(render_night_prayer("Kinh Tối", "kinh-toi", source, night_payload))
+    prayers.append(render_night_prayer("Kinh Tối", "kinh-toi", source, night_payload, date))
     liturgical_day = extract_liturgical_day(payloads)
     debug_lines = [
         f"URL fetched: {SOURCE_URL}",
