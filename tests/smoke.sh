@@ -70,21 +70,6 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 from scripts.fetch import block_units
 
-try:
-    from playwright.sync_api import sync_playwright
-except ImportError:
-    sync_playwright = None
-
-kindle_pages = []
-active_kindle_dirs = {Path("site")}
-index_html = Path("site/index.html")
-if index_html.exists():
-    index_soup = BeautifulSoup(index_html.read_text(encoding="utf-8"), "lxml")
-    for link in index_soup.select(".date-nav a[href]"):
-        href = link.get("href", "")
-        if re.match(r"^\d{4}-\d{2}-\d{2}/", href):
-            active_kindle_dirs.add(Path("site") / href.split("/", 1)[0])
-
 for path in Path("site").rglob("*.html"):
     text = path.read_text(encoding="utf-8")
     soup = BeautifulSoup(text, "lxml")
@@ -93,8 +78,6 @@ for path in Path("site").rglob("*.html"):
     if 'class="verse-line"' in text and '</span><br/><span class="verse-line"' in text:
         raise SystemExit(f"Unexpected blank-line br between verse lines in {path}")
     if 'class="page-nav paged-nav"' in text:
-        if path.parent in active_kindle_dirs:
-            kindle_pages.append(path)
         main = soup.find("main")
         if not main:
             raise SystemExit(f"Missing main in {path}")
@@ -104,38 +87,13 @@ for path in Path("site").rglob("*.html"):
             block_units(str(child))
             for child in main.find_all(["h1", "h2", "h3", "p", "div"], recursive=False)
         )
-        if not sync_playwright and units > 24:
+        if units > 20:
             raise SystemExit(f"Page likely too long for Kindle viewport: {path} ({units} units)")
-
-if sync_playwright and kindle_pages:
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch()
-            page = browser.new_page(viewport={"width": 1080, "height": 1230}, device_scale_factor=1)
-            for path in kindle_pages:
-                page.goto(path.resolve().as_uri())
-                metrics = page.evaluate(
-                    """() => {
-                        const nav = document.querySelector('main > .page-nav:last-child');
-                        const rect = nav ? nav.getBoundingClientRect() : null;
-                        return {
-                            scrollHeight: document.documentElement.scrollHeight,
-                            navBottom: rect ? rect.bottom : 0,
-                            viewportHeight: window.innerHeight
-                        };
-                    }"""
-                )
-                if metrics["scrollHeight"] > 1230:
-                    raise SystemExit(f"Kindle page overflows viewport: {path} ({metrics['scrollHeight']}px)")
-                if abs(metrics["viewportHeight"] - metrics["navBottom"] - 20) > 2:
-                    raise SystemExit(f"Kindle nav is not at page bottom: {path} ({metrics['navBottom']}px)")
-            browser.close()
-    except Exception as exc:
-        print(f"Skipping Playwright viewport smoke check: {exc}")
 
 required_initial_pages = [
     Path("site/kinh-sang.html"),
     Path("site/kinh-sang-6.html"),
+    Path("site/kinh-chieu-4.html"),
 ]
 for path in required_initial_pages:
     if 'class="illuminated-initial"' not in path.read_text(encoding="utf-8"):
@@ -181,8 +139,6 @@ def require_initial_after_heading(pattern: str, heading_prefix: str, skip_classe
                         classes = set(candidate.get("class", [])) if hasattr(candidate, "get") else set()
                         if "updated" in classes:
                             continue
-                        if classes & set(skip_classes):
-                            continue
                         if candidate.get_text(" ", strip=True):
                             if not candidate.select_one(".illuminated-initial"):
                                 raise SystemExit(f"Missing illuminated initial after {heading_prefix} in {next_path}")
@@ -199,30 +155,12 @@ require_initial_after_heading("kinh-*.html", "Xướng đáp")
 require_initial_after_heading("kinh-chieu*.html", "Thánh ca Tin Mừng", skip_classes=("antiphon",))
 
 found_marian_canticle = False
-
-def numbered_page_key(path: Path):
-    if "-" in path.stem and path.stem.rsplit("-", 1)[1].isdigit():
-        base, number = path.stem.rsplit("-", 1)
-        return path.parent, base, int(number)
-    return path.parent, path.stem, 1
-
-night_page_map = {numbered_page_key(path): path for path in Path("site").glob("kinh-toi*.html")}
 for path in Path("site").glob("kinh-toi*.html"):
     soup = BeautifulSoup(path.read_text(encoding="utf-8"), "lxml")
     for title in soup.find_all(class_="title"):
         if not any(name in title.get_text(" ", strip=True) for name in ("Salve Regina", "Ave Regina", "Sub tuum", "Regina caeli")):
             continue
         first_body = title.find_next_sibling("p")
-        if not first_body:
-            parent, base, number = numbered_page_key(path)
-            next_path = night_page_map.get((parent, base, number + 1))
-            if next_path:
-                next_soup = BeautifulSoup(next_path.read_text(encoding="utf-8"), "lxml")
-                for candidate in next_soup.find_all("p"):
-                    classes = set(candidate.get("class", []))
-                    if "updated" not in classes and candidate.get_text(" ", strip=True):
-                        first_body = candidate
-                        break
         if not first_body or not first_body.select_one(".illuminated-initial"):
             raise SystemExit(f"Missing illuminated initial in Marian canticle in {path}")
         found_marian_canticle = True

@@ -9,8 +9,6 @@ html {
 body {
   margin: 0;
   padding: 24px 34px 20px 34px;
-  width: 1080px;
-  min-height: 1230px;
   color: #111;
   background: #fff;
   font-family: Georgia, "Times New Roman", serif;
@@ -21,10 +19,7 @@ body {
 
 main {
   max-width: none;
-  min-height: calc(1230px - 44px);
   margin: 0 auto;
-  display: flex;
-  flex-direction: column;
 }
 
 h1 {
@@ -57,10 +52,6 @@ p {
 
 p.split-block {
   margin-bottom: 10px;
-}
-
-p.split-verse-block {
-  margin-bottom: 4px;
 }
 
 .updated {
@@ -178,9 +169,9 @@ em,
 .paged-nav span {
   min-width: 0;
   width: 18%;
-  min-height: 64px;
+  min-height: 82px;
   margin-right: 1%;
-  padding: 8px 2px;
+  padding: 16px 2px;
   vertical-align: top;
 }
 
@@ -198,8 +189,8 @@ em,
 }
 
 .page-nav:last-child {
-  margin: auto 0 0 0;
-  padding: 8px 0 0 0;
+  margin: 22px 0 0 0;
+  padding: 12px 0 0 0;
   border-top: 2px solid #777;
   border-bottom: 0;
 }
@@ -295,8 +286,6 @@ p > .body {
 }
 
 .responsive-page {
-  width: auto;
-  min-height: 0;
   padding: 18px 18px 26px 18px;
   color: #171717;
   background: #fbfaf7;
@@ -308,9 +297,7 @@ p > .body {
 
 .responsive-page main {
   width: min(100%, 760px);
-  min-height: 0;
   margin: 0 auto;
-  display: block;
 }
 
 .responsive-page h1 {
