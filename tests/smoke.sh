@@ -94,7 +94,6 @@ required_initial_pages = [
     Path("site/kinh-sang.html"),
     Path("site/kinh-sang-6.html"),
     Path("site/kinh-chieu-4.html"),
-    Path("site/kinh-chieu-17.html"),
 ]
 for path in required_initial_pages:
     if 'class="illuminated-initial"' not in path.read_text(encoding="utf-8"):
@@ -153,6 +152,7 @@ def require_initial_after_heading(pattern: str, heading_prefix: str, skip_classe
 
 require_initial_after_heading("kinh-sang*.html", "Lời Chúa")
 require_initial_after_heading("kinh-*.html", "Xướng đáp")
+require_initial_after_heading("kinh-chieu*.html", "Thánh ca Tin Mừng", skip_classes=("antiphon",))
 
 found_marian_canticle = False
 for path in Path("site").glob("kinh-toi*.html"):
