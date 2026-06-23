@@ -71,10 +71,9 @@ PRAYERS = [
 PAGE_TARGET_UNITS = 17
 FIRST_PAGE_TARGET_UNITS = 14
 CHARS_PER_READING_LINE = 30
-MIN_UNITS_BEFORE_HEADING_BREAK = 7
 MIN_PAGE_UNITS = 12
-SPLIT_PARAGRAPH_MIN_LINES = 4
-SPLIT_PARAGRAPH_CHUNK_LINES = 2
+SPLIT_PARAGRAPH_MIN_LINES = 2
+SPLIT_PARAGRAPH_CHUNK_LINES = 1
 
 LABEL_PATTERNS = [
     r"^ĐC\b",
@@ -1531,33 +1530,59 @@ def page_units(blocks: list[str]) -> int:
     return sum(block_units(block) for block in blocks)
 
 
-def paragraph_lines(node: Tag) -> list[str]:
-    if len(node.find_all("br", recursive=False)) + 1 < SPLIT_PARAGRAPH_MIN_LINES:
-        return []
-
-    lines: list[str] = []
-    current: list[str] = []
-    for child in node.contents:
-        if isinstance(child, Tag) and child.name == "br":
-            line = "".join(current).strip()
-            if line:
-                lines.append(line)
-            current = []
-            continue
-        current.append(str(child))
-
-    line = "".join(current).strip()
-    if line:
-        lines.append(line)
-
-    return lines if len(lines) >= SPLIT_PARAGRAPH_MIN_LINES else []
+def split_block_line_count(node: Tag) -> int:
+    if not node.get_text(" ", strip=True):
+        return 0
+    return len(node.find_all("br")) + 1
 
 
-def render_split_paragraph(node: Tag, lines: list[str]) -> str:
+def tag_attrs_html(node: Tag, split_block: bool = False) -> str:
+    attrs: list[str] = []
+    for key, value in node.attrs.items():
+        if key == "class":
+            classes = [class_name for class_name in node.get("class", []) if class_name != "split-block"]
+            if split_block:
+                classes.append("split-block")
+            value = classes
+        elif split_block and key not in node.attrs:
+            value = ["split-block"]
+
+        if value is True:
+            attrs.append(html.escape(key, quote=True))
+        elif isinstance(value, list):
+            if value:
+                attrs.append(f'{html.escape(key, quote=True)}="{html.escape(" ".join(map(str, value)), quote=True)}"')
+        elif value is not None:
+            attrs.append(f'{html.escape(key, quote=True)}="{html.escape(str(value), quote=True)}"')
+
+    if split_block and "class" not in node.attrs:
+        attrs.append('class="split-block"')
+    return (" " + " ".join(attrs)) if attrs else ""
+
+
+def render_line_range(node, start_line: int, end_line: int, state: dict[str, int]) -> str:
+    if isinstance(node, NavigableString):
+        return html.escape(str(node)) if start_line <= state["line"] < end_line else ""
+    if not isinstance(node, Tag):
+        return ""
+    if node.name == "br":
+        previous_line = state["line"]
+        state["line"] += 1
+        return "<br/>" if start_line <= previous_line < end_line - 1 else ""
+
+    contents = "".join(render_line_range(child, start_line, end_line, state) for child in node.contents)
+    if not BeautifulSoup(contents, "lxml").get_text(" ", strip=True):
+        return ""
+    return f"<{node.name}{tag_attrs_html(node)}>{contents}</{node.name}>"
+
+
+def render_split_line_block(node: Tag, start_line: int, end_line: int) -> str:
+    state = {"line": 0}
+    contents = "".join(render_line_range(child, start_line, end_line, state) for child in node.contents).strip()
     classes = [class_name for class_name in node.get("class", []) if class_name != "split-block"]
     classes.append("split-block")
     class_attr = html.escape(" ".join(classes), quote=True)
-    return f'<p class="{class_attr}">{"<br/>".join(lines)}</p>'
+    return f'<{node.name} class="{class_attr}">{contents}</{node.name}>'
 
 
 def paragraph_text_tokens(node: Tag) -> list[str]:
@@ -1580,13 +1605,27 @@ def render_split_tokens_paragraph(node: Tag, tokens: list[str]) -> str:
     return f'<p class="{class_attr}">{"".join(tokens).strip()}</p>'
 
 
+def carry_illuminated_initial_to_suffix(prefix: str, suffix: str) -> str:
+    if "illuminated-initial" not in prefix or "illuminated-initial" in suffix:
+        return suffix
+
+    soup = fragment_soup(suffix)
+    wrapper = soup.find("div")
+    if not isinstance(wrapper, Tag):
+        return suffix
+    for child in wrapper.contents:
+        if isinstance(child, Tag) and add_initial_to_node(child):
+            return html_children(wrapper)
+    return suffix
+
+
 def split_text_paragraph_to_fit(paragraph: Tag, remaining_units: int) -> tuple[str, str] | None:
-    if remaining_units < 4:
+    if remaining_units < 1:
         return None
 
     allowed_units = remaining_units + 2
     tokens = paragraph_text_tokens(paragraph)
-    if len(tokens) < 8:
+    if len(tokens) < 3:
         return None
 
     best_cut = 0
@@ -1600,42 +1639,30 @@ def split_text_paragraph_to_fit(paragraph: Tag, remaining_units: int) -> tuple[s
     if best_cut <= 0 or best_cut >= len(tokens):
         return None
 
-    preferred_cut = best_cut
-    for punctuation in (r"[.!?][”\"]?$", r"[;:,”“]$"):
-        for cut in range(best_cut, max(0, best_cut - 60), -1):
-            candidate = render_split_tokens_paragraph(paragraph, tokens[:cut])
-            text = BeautifulSoup(candidate, "lxml").get_text(" ", strip=True)
-            if re.search(punctuation, text) and block_units(candidate) >= max(2, remaining_units - 4):
-                preferred_cut = cut
-                break
-        if preferred_cut != best_cut:
-            break
-    best_cut = preferred_cut
-
-    suffix = render_split_tokens_paragraph(paragraph, tokens[best_cut:])
+    prefix = render_split_tokens_paragraph(paragraph, tokens[:best_cut])
+    suffix = carry_illuminated_initial_to_suffix(prefix, render_split_tokens_paragraph(paragraph, tokens[best_cut:]))
     if not BeautifulSoup(suffix, "lxml").get_text(" ", strip=True):
         return None
 
-    prefix = render_split_tokens_paragraph(paragraph, tokens[:best_cut])
     return prefix, suffix
 
 
 def split_block_to_fit(block_html: str, remaining_units: int) -> tuple[str, str] | None:
-    if remaining_units < 2:
+    if remaining_units < 1:
         return None
 
     soup = BeautifulSoup(block_html, "lxml")
-    paragraph = soup.find("p")
+    paragraph = soup.find(["p", "div", "span"])
     if not paragraph:
         return None
 
-    lines = paragraph_lines(paragraph)
-    if not lines:
+    line_count = split_block_line_count(paragraph)
+    if line_count < SPLIT_PARAGRAPH_MIN_LINES:
         return split_text_paragraph_to_fit(paragraph, remaining_units)
 
     best_cut = 0
-    for cut in range(SPLIT_PARAGRAPH_CHUNK_LINES, len(lines)):
-        prefix = render_split_paragraph(paragraph, lines[:cut])
+    for cut in range(SPLIT_PARAGRAPH_CHUNK_LINES, line_count):
+        prefix = render_split_line_block(paragraph, 0, cut)
         if block_units(prefix) <= remaining_units:
             best_cut = cut
         else:
@@ -1643,11 +1670,9 @@ def split_block_to_fit(block_html: str, remaining_units: int) -> tuple[str, str]
 
     if best_cut <= 0:
         return None
-    if len(lines) - best_cut == 1 and best_cut > SPLIT_PARAGRAPH_CHUNK_LINES:
-        best_cut -= 1
 
-    prefix = render_split_paragraph(paragraph, lines[:best_cut])
-    suffix = render_split_paragraph(paragraph, lines[best_cut:])
+    prefix = render_split_line_block(paragraph, 0, best_cut)
+    suffix = carry_illuminated_initial_to_suffix(prefix, render_split_line_block(paragraph, best_cut, line_count))
     return prefix, suffix
 
 
@@ -1728,6 +1753,7 @@ def html_blocks(fragment: str) -> list[str]:
             "label",
             "note",
             "right-indexing",
+            "section",
             "stanza",
             "title",
         }:
@@ -1774,11 +1800,6 @@ def paginate_html(fragment: str) -> list[str]:
         block = pending.pop(0)
         units = block_units(block)
         target = FIRST_PAGE_TARGET_UNITS if not pages else PAGE_TARGET_UNITS
-        if current and is_heading_block(block) and current_units >= MIN_UNITS_BEFORE_HEADING_BREAK:
-            pages.append(current)
-            current = []
-            current_units = 0
-            target = PAGE_TARGET_UNITS
         if current and current_units + units > target:
             split = split_block_to_fit(block, target - current_units)
             if split:
