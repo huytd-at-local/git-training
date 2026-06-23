@@ -161,6 +161,7 @@ class Prayer:
     title: str
     slug: str
     body_html: str
+    liturgical_day: LiturgicalDay | None = None
 
 
 @dataclass(frozen=True)
@@ -755,14 +756,19 @@ def render_dom_prayer(title: str, slug: str, source: str, payload: dict, root_ke
     return Prayer(title, slug, add_illuminated_initials(body))
 
 
+def clean_liturgical_title(value: str) -> str:
+    value = re.sub(r"\s*<br\s*/?>\s*", " - ", value, flags=re.I)
+    return re.sub(r"\s+", " ", value).strip()
+
+
 def extract_liturgical_day(payloads: list[dict]) -> LiturgicalDay | None:
     for payload in payloads:
         info = payload.get("date_info")
         if not isinstance(info, dict):
             continue
-        main_title = str(info.get("main_title") or "").strip()
-        sub_title = str(info.get("sub_title") or "").strip()
-        daily_title = str(info.get("daily_title") or "").strip()
+        main_title = clean_liturgical_title(str(info.get("main_title") or ""))
+        sub_title = clean_liturgical_title(str(info.get("sub_title") or ""))
+        daily_title = clean_liturgical_title(str(info.get("daily_title") or ""))
         title = sub_title or main_title or daily_title
         date_title = main_title if sub_title and main_title != sub_title else daily_title
         rank = str(info.get("rank") or info.get("type") or "").strip()
@@ -771,7 +777,7 @@ def extract_liturgical_day(payloads: list[dict]) -> LiturgicalDay | None:
             return LiturgicalDay(title=title, rank=rank, selector=selector, date_title=date_title)
         feasts = payload.get("feasts")
         if isinstance(feasts, list) and feasts:
-            title = str(feasts[0].get("text") or "").strip()
+            title = clean_liturgical_title(str(feasts[0].get("text") or ""))
             if title:
                 return LiturgicalDay(title=title, rank=rank, selector="payload.feasts[0].text")
     return None
@@ -1144,12 +1150,14 @@ def build_prayers_from_api(session: requests.Session, source: str, date: datetim
         payload = fetch_prayer_json(session, date, active_prayer, hour)
         payloads.append(payload)
         write_payload_debug(slug, payload)
-        prayers.append(render_dom_prayer(title, slug, source, payload, root_key, tab_id))
+        prayer = render_dom_prayer(title, slug, source, payload, root_key, tab_id)
+        prayers.append(Prayer(prayer.title, prayer.slug, prayer.body_html, extract_liturgical_day([payload])))
 
     night_payload = fetch_prayer_json(session, date, "nightPrayer")
     payloads.append(night_payload)
     write_payload_debug("kinh-toi", night_payload)
-    prayers.append(render_night_prayer("Kinh Tối", "kinh-toi", source, night_payload, date))
+    prayer = render_night_prayer("Kinh Tối", "kinh-toi", source, night_payload, date)
+    prayers.append(Prayer(prayer.title, prayer.slug, prayer.body_html, extract_liturgical_day([night_payload])))
     liturgical_day = extract_liturgical_day(payloads)
     debug_lines = [
         f"URL fetched: {SOURCE_URL}",
@@ -1945,7 +1953,7 @@ def write_day_site(
                 prayer.body_html,
                 updated,
                 "",
-                liturgical_day,
+                prayer.liturgical_day or liturgical_day,
                 css_href=css_href,
                 bottom_nav=nav,
                 body_class="responsive-page responsive-prayer",
@@ -1982,7 +1990,7 @@ def write_day_site(
                     page_body,
                     updated,
                     "",
-                    liturgical_day,
+                    prayer.liturgical_day or liturgical_day,
                     show_metadata=page_index == 1,
                     show_title=page_index == 1,
                     page_note=page_note,

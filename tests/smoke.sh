@@ -247,6 +247,26 @@ dated_indexes = sorted(Path("site").glob("20??-??-??/index.html"))
 if len(dated_indexes) < 3:
     raise SystemExit("Expected yesterday/today/tomorrow dated indexes")
 
+for path in Path("site").rglob("*.html"):
+    soup = BeautifulSoup(path.read_text(encoding="utf-8"), "lxml")
+    for title in soup.select(".feast-title"):
+        text = title.get_text(" ", strip=True)
+        if "<br" in text.lower():
+            raise SystemExit(f"Liturgical title contains literal br markup in {path}: {text!r}")
+
+expected_john_title = "Ngày 24 tháng 6 - SINH NHẬT THÁNH GIO-AN TẨY GIẢ"
+john_index = Path("site/2026-06-24/index.html")
+if john_index.exists():
+    text = BeautifulSoup(john_index.read_text(encoding="utf-8"), "lxml").select_one(".feast-title").get_text(" ", strip=True)
+    if text != expected_john_title:
+        raise SystemExit(f"Unexpected June 24 liturgical title: {text!r}")
+
+for path in [Path("site/2026-06-23/kinh-chieu.html"), Path("site/2026-06-23/kinh-toi.html")]:
+    if path.exists():
+        text = BeautifulSoup(path.read_text(encoding="utf-8"), "lxml").select_one(".feast-title").get_text(" ", strip=True)
+        if text != expected_john_title:
+            raise SystemExit(f"Expected evening vigil title in {path}: {text!r}")
+
 for path in Path("site").glob("*.html"):
     text = path.read_text(encoding="utf-8")
     if text.count("Chúa Nhật Tuần XI - Mùa Thường Niên") > 1:
