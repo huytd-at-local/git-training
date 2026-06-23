@@ -66,6 +66,7 @@ fi
 
 "$PYTHON_BIN" - <<'PY'
 import re
+import unicodedata
 from pathlib import Path
 from bs4 import BeautifulSoup
 from scripts.fetch import block_units
@@ -77,10 +78,18 @@ for path in Path("site").rglob("*.html"):
         raise SystemExit(f"Wide verse number missing class in {path}")
     if 'class="verse-line"' in text and '</span><br/><span class="verse-line"' in text:
         raise SystemExit(f"Unexpected blank-line br between verse lines in {path}")
+    for initial in soup.select(".illuminated-initial"):
+        value = initial.get_text("", strip=True)
+        if not value or not unicodedata.category(value[0]).startswith("L"):
+            raise SystemExit(f"Illuminated initial is not a letter in {path}: {value!r}")
     if 'class="page-nav paged-nav"' in text:
         main = soup.find("main")
         if not main:
             raise SystemExit(f"Missing main in {path}")
+        for updated in soup.select("p.updated"):
+            label = updated.get_text(" ", strip=True)
+            if label.startswith("Trang "):
+                raise SystemExit(f"Paged note should include prayer title in {path}: {label!r}")
         for nav in main.find_all("nav"):
             nav.decompose()
         units = sum(

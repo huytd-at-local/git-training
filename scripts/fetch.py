@@ -471,6 +471,17 @@ INITIAL_HEADING_KEYS = {
 }
 
 
+def first_letter_range(text: str) -> tuple[int, int] | None:
+    for index, character in enumerate(text):
+        if not unicodedata.category(character).startswith("L"):
+            continue
+        end = index + 1
+        while end < len(text) and unicodedata.category(text[end]).startswith("M"):
+            end += 1
+        return index, end
+    return None
+
+
 def add_initial_to_node(node: Tag) -> bool:
     if node.select_one(".illuminated-initial"):
         return False
@@ -486,11 +497,11 @@ def add_initial_to_node(node: Tag) -> bool:
         if parent.find_parent(["sup", "script", "style"]):
             continue
         text = str(descendant)
-        match = re.search(r"\S", text)
-        if not match:
+        letter_range = first_letter_range(text)
+        if not letter_range:
             continue
-        index = match.start()
-        initial = text[index]
+        index, end = letter_range
+        initial = text[index:end]
         soup = BeautifulSoup("", "lxml")
         initial_tag = soup.new_tag("span")
         initial_tag["class"] = ["illuminated-initial"]
@@ -499,8 +510,8 @@ def add_initial_to_node(node: Tag) -> bool:
         if index:
             replacement.append(NavigableString(text[:index]))
         replacement.append(initial_tag)
-        if index + 1 < len(text):
-            replacement.append(NavigableString(text[index + 1 :]))
+        if end < len(text):
+            replacement.append(NavigableString(text[end:]))
         descendant.replace_with(*replacement)
         return True
     return False
@@ -1964,7 +1975,7 @@ def write_day_site(
 
             index_href = "index.html" if from_dir else day_href(date)
             nav = page_nav_html(previous_href, next_href, page_index, page_count, index_href)
-            page_note = f"Trang {page_index}/{page_count}" if page_index > 1 else ""
+            page_note = f"{prayer.title} {page_index}/{page_count}" if page_index > 1 else ""
             (target_dir / prayer_page_filename(prayer.slug, page_index)).write_text(
                 page_shell(
                     prayer.title,
