@@ -155,33 +155,12 @@ require_initial_after_heading("kinh-*.html", "Xướng đáp")
 require_initial_after_heading("kinh-chieu*.html", "Thánh ca Tin Mừng", skip_classes=("antiphon",))
 
 found_marian_canticle = False
-
-def next_paged_path(path: Path) -> Path | None:
-    if "-" in path.stem and path.stem.rsplit("-", 1)[1].isdigit():
-        base, number = path.stem.rsplit("-", 1)
-        candidate = path.with_name(f"{base}-{int(number) + 1}{path.suffix}")
-    else:
-        candidate = path.with_name(f"{path.stem}-2{path.suffix}")
-    return candidate if candidate.exists() else None
-
 for path in Path("site").glob("kinh-toi*.html"):
     soup = BeautifulSoup(path.read_text(encoding="utf-8"), "lxml")
     for title in soup.find_all(class_="title"):
         if not any(name in title.get_text(" ", strip=True) for name in ("Salve Regina", "Ave Regina", "Sub tuum", "Regina caeli")):
             continue
         first_body = title.find_next_sibling("p")
-        if not first_body:
-            next_path = next_paged_path(path)
-            if next_path:
-                next_soup = BeautifulSoup(next_path.read_text(encoding="utf-8"), "lxml")
-                first_body = next(
-                    (
-                        candidate
-                        for candidate in next_soup.find_all("p", recursive=True)
-                        if "updated" not in candidate.get("class", []) and candidate.get_text(" ", strip=True)
-                    ),
-                    None,
-                )
         if not first_body or not first_body.select_one(".illuminated-initial"):
             raise SystemExit(f"Missing illuminated initial in Marian canticle in {path}")
         found_marian_canticle = True
