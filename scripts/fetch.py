@@ -325,6 +325,24 @@ def fill_payload_placeholders(container: Tag, prayer_data: dict, root_key: str) 
             break
 
 
+def remove_disabled_glory_blocks(container: Tag, root: dict) -> None:
+    for glory in list(container.select(".glory")):
+        previous = glory.find_previous_sibling()
+        while isinstance(previous, Tag) and not previous.get_text(strip=True):
+            previous = previous.find_previous_sibling()
+        if not isinstance(previous, Tag):
+            continue
+        content_key = None
+        for class_name in previous.get("class", []):
+            match = re.match(r"^[a-zA-Z_]+\[(?P<key>[^\]]+)\]\[content\]$", class_name)
+            if match:
+                content_key = match.group("key")
+                break
+        section = ci_get(root, content_key, {}) if content_key else {}
+        if isinstance(section, dict) and not ci_get(section, "glory", False):
+            glory.decompose()
+
+
 def unwrap_preserving_children(tag: Tag) -> None:
     tag.unwrap()
 
@@ -374,6 +392,10 @@ def sanitize_render_dom(container: Tag) -> None:
 
 
 def post_process_render_dom(container: Tag) -> None:
+    for sup in list(container.find_all("sup")):
+        if re.fullmatch(r"\d+[A-Za-z]+", sup.get_text(strip=True)):
+            sup.decompose()
+
     for pre in container.select(".pre"):
         text = pre.get_text("", strip=True)
         if text and not text.endswith(":"):
@@ -735,6 +757,8 @@ def render_dom_prayer(title: str, slug: str, source: str, payload: dict, root_ke
 
     fill_payload_placeholders(normal, prayer_data, root_key)
     root = prayer_data.get(root_key, {})
+    if isinstance(root, dict):
+        remove_disabled_glory_blocks(normal, root)
     if isinstance(root, dict) and ci_get(root, "feast_hide"):
         for tag in list(normal.select(".feast-hide")):
             tag.decompose()
@@ -901,7 +925,8 @@ def render_psalm(lines: list[str], root: dict, key: str) -> None:
         lines.extend(["", heading])
     add_html(lines, None, ci_get(psalm, "EPITOMIZE"))
     add_html(lines, None, ci_get(psalm, "CONTENT"))
-    lines.extend(GLORY_LINES)
+    if ci_get(psalm, "glory", key_l != "canticle"):
+        lines.extend(GLORY_LINES)
     render_antiphon(lines, root, antiphon_key)
 
 

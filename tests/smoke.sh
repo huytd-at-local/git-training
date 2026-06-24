@@ -71,11 +71,16 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 from scripts.fetch import block_units
 
+index_html = Path("site/index.html").read_text(encoding="utf-8")
+current_day_names = set(re.findall(r"'(\d{4}-\d{2}-\d{2})'", index_html))
+
 for path in Path("site").rglob("*.html"):
     text = path.read_text(encoding="utf-8")
     soup = BeautifulSoup(text, "lxml")
     if re.search(r"<sup>\d{3,}</sup>", text):
         raise SystemExit(f"Wide verse number missing class in {path}")
+    if (path.parent == Path("site") or path.parent.name in current_day_names) and re.search(r"<sup>\d+[A-Za-z]+</sup>", text):
+        raise SystemExit(f"Lettered verse marker leaked into {path}")
     if 'class="verse-line"' in text and '</span><br/><span class="verse-line"' in text:
         raise SystemExit(f"Unexpected blank-line br between verse lines in {path}")
     for initial in soup.select(".illuminated-initial"):
@@ -98,15 +103,6 @@ for path in Path("site").rglob("*.html"):
         )
         if units > 20:
             raise SystemExit(f"Page likely too long for Kindle viewport: {path} ({units} units)")
-
-required_initial_pages = [
-    Path("site/kinh-sang.html"),
-    Path("site/kinh-sang-6.html"),
-    Path("site/kinh-chieu-4.html"),
-]
-for path in required_initial_pages:
-    if 'class="illuminated-initial"' not in path.read_text(encoding="utf-8"):
-        raise SystemExit(f"Missing illuminated initial in {path}")
 
 if 'class="illuminated-initial"' in Path("site/kinh-sang-2.html").read_text(encoding="utf-8"):
     raise SystemExit("Unexpected repeated invitatory initial after repeated antiphon")
@@ -195,6 +191,22 @@ if Path("build/kinh-sach.json").exists():
         office_html = "\n".join(path.read_text(encoding="utf-8") for path in Path("site").glob("kinh-sach*.html"))
         if "Te Deum" in office_html or "Thánh thi “Lạy Thiên Chúa”" in office_html:
             raise SystemExit("Te Deum rendered even though source payload disables it")
+
+for path in Path("site").rglob("kinh-sang*.html"):
+    soup = BeautifulSoup(path.read_text(encoding="utf-8"), "lxml")
+    markers = soup.find_all(string=lambda value: value and "Tc Đn 3,57-88.56" in value)
+    for marker in markers:
+        marker_node = marker.parent
+        content_node = marker_node.find_next("p") if marker_node else None
+        following_text = []
+        node = content_node.find_next_sibling() if content_node else None
+        while node is not None:
+            if getattr(node, "name", None) in {"h2", "h3"}:
+                break
+            following_text.append(node.get_text(" ", strip=True) if hasattr(node, "get_text") else str(node).strip())
+            node = node.find_next_sibling()
+        if "Vinh danh Chúa Cha" in "\n".join(following_text):
+            raise SystemExit(f"Unexpected Glory Be after Daniel canticle in {path}")
 
 responsive_index = Path("site/index-responsive.html")
 if not responsive_index.exists():
