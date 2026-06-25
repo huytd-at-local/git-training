@@ -83,6 +83,27 @@ for path in Path("site").rglob("*.html"):
         raise SystemExit(f"Lettered verse marker leaked into {path}")
     if 'class="verse-line"' in text and '</span><br/><span class="verse-line"' in text:
         raise SystemExit(f"Unexpected blank-line br between verse lines in {path}")
+    in_psalm_or_canticle = False
+    for node in soup.find_all(["h2", "h3", "p"]):
+        classes = set(node.get("class", [])) if hasattr(node, "get") else set()
+        node_text = node.get_text(" ", strip=True)
+        key = unicodedata.normalize("NFD", node_text).encode("ascii", "ignore").decode("ascii").lower()
+        key = re.sub(r"[^a-z0-9]+", " ", key).strip()
+        if node.name in {"h2", "h3"}:
+            in_psalm_or_canticle = False
+            continue
+        if "indexing" in classes:
+            in_psalm_or_canticle = key.startswith("tv ") or key.startswith("tc ")
+            continue
+        if not in_psalm_or_canticle or node.name != "p":
+            continue
+        first = next((child for child in node.children if not (isinstance(child, str) and not child.strip())), None)
+        if getattr(first, "name", None) == "span" and not first.get("class"):
+            first_text = re.sub(r"\s+", " ", first.get_text(" ", strip=True))
+            if re.fullmatch(r"\d+ \d+", first_text):
+                raise SystemExit(f"Psalm/canticle chapter marker leaked in {path}: {first_text!r}")
+        if re.fullmatch(r"\d+", node.get_text(" ", strip=True) or ""):
+            raise SystemExit(f"Psalm/canticle standalone chapter marker leaked in {path}: {node_text!r}")
     for initial in soup.select(".illuminated-initial"):
         value = initial.get_text("", strip=True)
         if not value or not unicodedata.category(value[0]).startswith("L"):

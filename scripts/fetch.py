@@ -396,6 +396,90 @@ def post_process_render_dom(container: Tag) -> None:
         if re.fullmatch(r"\d+[A-Za-z]+", sup.get_text(strip=True)):
             sup.decompose()
 
+    def is_psalm_or_canticle_indexing(text: str) -> bool:
+        key = normalize_key(text)
+        return key.startswith("tv ") or key.startswith("tc ")
+
+    def meaningful_sibling(node: Tag | NavigableString | None, direction: str):
+        while node is not None:
+            if isinstance(node, NavigableString) and not str(node).strip():
+                node = node.previous_sibling if direction == "previous" else node.next_sibling
+                continue
+            return node
+        return None
+
+    def is_plain_digit_span(node: Tag) -> bool:
+        return (
+            isinstance(node, Tag)
+            and node.name == "span"
+            and not node.get("class")
+            and re.fullmatch(r"\d+", node.get_text("", strip=True) or "")
+        )
+
+    def is_chapter_verse_marker(node: Tag) -> bool:
+        if not isinstance(node, Tag) or node.name != "span" or node.get("class"):
+            return False
+        sup = node.find("sup", recursive=False)
+        if not isinstance(sup, Tag) or not re.fullmatch(r"\d+", sup.get_text("", strip=True) or ""):
+            return False
+        chapter = next((child for child in node.children if isinstance(child, Tag) and child is not sup), None)
+        if not isinstance(chapter, Tag) or not is_plain_digit_span(chapter):
+            return False
+        text = re.sub(r"\s+", " ", node.get_text(" ", strip=True))
+        return bool(re.fullmatch(r"\d+ \d+", text))
+
+    def remove_psalm_chapter_markers(paragraph: Tag) -> None:
+        soup = BeautifulSoup("", "lxml")
+        for span in list(paragraph.select(".verse-continuation")):
+            if re.fullmatch(r"\d+", span.get_text("", strip=True) or ""):
+                span.decompose()
+
+        for marker in list(paragraph.find_all("span", recursive=False)):
+            if not is_chapter_verse_marker(marker):
+                continue
+            sup = marker.find("sup", recursive=False)
+            if not isinstance(sup, Tag):
+                continue
+            next_node = meaningful_sibling(marker.next_sibling, "next")
+            verse = soup.new_tag("span")
+            verse["class"] = ["verse-line"]
+            verse.append(sup.extract())
+            verse.append(NavigableString(" "))
+            if isinstance(next_node, Tag) and next_node.name == "span":
+                verse.append(next_node.extract())
+            elif isinstance(next_node, NavigableString) and str(next_node).strip():
+                verse.append(NavigableString(str(next_node).strip()))
+                next_node.extract()
+            marker.replace_with(verse)
+
+        for span in list(paragraph.find_all("span", recursive=False)):
+            if span.get("class") or not re.fullmatch(r"\d+", span.get_text("", strip=True) or ""):
+                continue
+            previous = meaningful_sibling(span.previous_sibling, "previous")
+            next_node = meaningful_sibling(span.next_sibling, "next")
+            previous_is_verse = isinstance(previous, Tag) and any(
+                cls in previous.get("class", []) for cls in ("verse-line", "verse-continuation")
+            )
+            next_is_verse = isinstance(next_node, Tag) and any(
+                cls in next_node.get("class", []) for cls in ("verse-line", "verse-continuation")
+            )
+            next_is_text_span = isinstance(next_node, Tag) and next_node.name == "span" and bool(next_node.get_text(" ", strip=True))
+            if (previous_is_verse and next_is_verse) or next_is_verse or next_is_text_span:
+                span.decompose()
+
+    in_psalm_or_canticle = False
+    for node in container.find_all(["h2", "h3", "p"], recursive=True):
+        classes = set(node.get("class", []))
+        text = node.get_text(" ", strip=True)
+        if node.name in {"h2", "h3"}:
+            in_psalm_or_canticle = False
+            continue
+        if "indexing" in classes:
+            in_psalm_or_canticle = is_psalm_or_canticle_indexing(text)
+            continue
+        if in_psalm_or_canticle and node.name == "p":
+            remove_psalm_chapter_markers(node)
+
     for pre in container.select(".pre"):
         text = pre.get_text("", strip=True)
         if text and not text.endswith(":"):
@@ -475,6 +559,19 @@ def post_process_render_dom(container: Tag) -> None:
         )
         if has_numbered_sibling or previous_verse_related:
             span["class"] = ["verse-continuation"]
+
+    in_psalm_or_canticle = False
+    for node in container.find_all(["h2", "h3", "p"], recursive=True):
+        classes = set(node.get("class", []))
+        text = node.get_text(" ", strip=True)
+        if node.name in {"h2", "h3"}:
+            in_psalm_or_canticle = False
+            continue
+        if "indexing" in classes:
+            in_psalm_or_canticle = is_psalm_or_canticle_indexing(text)
+            continue
+        if in_psalm_or_canticle and node.name == "p":
+            remove_psalm_chapter_markers(node)
 
     remove_br_between_verse_blocks()
 
