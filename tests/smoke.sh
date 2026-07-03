@@ -163,7 +163,7 @@ def require_initial_after_heading(pattern: str, heading_prefix: str, skip_classe
                         if candidate.find_parent(["p", "h2", "h3"]):
                             continue
                         classes = set(candidate.get("class", [])) if hasattr(candidate, "get") else set()
-                        if "updated" in classes:
+                        if "updated" in classes or classes & set(skip_classes):
                             continue
                         if candidate.get_text(" ", strip=True):
                             if not candidate.select_one(".illuminated-initial"):
@@ -212,6 +212,37 @@ if Path("build/kinh-sach.json").exists():
         office_html = "\n".join(path.read_text(encoding="utf-8") for path in Path("site").glob("kinh-sach*.html"))
         if "Te Deum" in office_html or "Thánh thi “Lạy Thiên Chúa”" in office_html:
             raise SystemExit("Te Deum rendered even though source payload disables it")
+
+for slug, root_key in [
+    ("kinh-sach", "office"),
+    ("kinh-sang", "morning"),
+    ("kinh-trua-gio-ba", "daytime"),
+    ("kinh-trua-gio-sau", "daytime"),
+    ("kinh-trua-gio-chin", "daytime"),
+    ("kinh-chieu", "evening"),
+]:
+    payload_path = Path(f"build/{slug}.json")
+    if not payload_path.exists():
+        continue
+    payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    season = str(payload.get("date_info", {}).get("season") or "").strip().lower()
+    prayer_items = payload.get("prayer")
+    prayer_payload = prayer_items[0] if isinstance(prayer_items, list) and prayer_items else {}
+    root = prayer_payload.get(root_key, {})
+    if season in {"easter", "eas"} or not isinstance(root, dict):
+        continue
+    has_easter_responsory = any(
+        isinstance(value, dict)
+        and "responsory" in key.lower()
+        and "only-easter" in str(value.get("CONTENT") or "")
+        for key, value in root.items()
+    )
+    if not has_easter_responsory:
+        continue
+    html = "\n".join(path.read_text(encoding="utf-8") for path in Path("site").glob(f"{slug}*.html"))
+    visible_text = BeautifulSoup(html, "lxml").get_text(" ", strip=True)
+    if "Ha-lê-lui-a. Ha-lê-lui-a." in visible_text:
+        raise SystemExit(f"Easter responsory variant leaked into non-Easter output for {slug}")
 
 for path in Path("site").rglob("kinh-sang*.html"):
     soup = BeautifulSoup(path.read_text(encoding="utf-8"), "lxml")

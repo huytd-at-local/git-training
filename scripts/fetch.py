@@ -343,6 +343,31 @@ def remove_disabled_glory_blocks(container: Tag, root: dict) -> None:
             glory.decompose()
 
 
+def normalize_season(value: object) -> str:
+    season = str(value or "").strip().lower()
+    return {
+        "eas": "easter",
+        "easter": "easter",
+        "chr": "christmas",
+        "christmas": "christmas",
+    }.get(season, season)
+
+
+def filter_seasonal_variants(container: Tag, season_value: object) -> None:
+    season = normalize_season(season_value)
+    for tag in list(container.select(".christmas, .easter")):
+        classes = set(tag.get("class", []))
+        if season not in {normalize_season(cls) for cls in classes}:
+            tag.decompose()
+
+    if season == "easter":
+        for tag in list(container.select(".not-easter")):
+            tag.decompose()
+    else:
+        for tag in list(container.select(".only-easter")):
+            tag.decompose()
+
+
 def unwrap_preserving_children(tag: Tag) -> None:
     tag.unwrap()
 
@@ -853,6 +878,7 @@ def render_dom_prayer(title: str, slug: str, source: str, payload: dict, root_ke
         raise ValueError(f"Could not find #{tab_id} .normal-content in source HTML")
 
     fill_payload_placeholders(normal, prayer_data, root_key)
+    filter_seasonal_variants(normal, payload.get("date_info", {}).get("season"))
     root = prayer_data.get(root_key, {})
     if isinstance(root, dict):
         remove_disabled_glory_blocks(normal, root)
@@ -1183,7 +1209,7 @@ def filter_night_dom(night: Tag, payload: dict, selection_day: int | None = None
     psalm_code = str(night_payload.get("code") or "")
     prayer_code = str(night_payload.get("prayer_cd") or "")
     reading_code = str(night_payload.get("reading_cd") or "")
-    season = payload.get("date_info", {}).get("season")
+    season = normalize_season(payload.get("date_info", {}).get("season"))
     today = payload.get("date_info", {}).get("today", {})
     try:
         day_number = int(today.get("date") or 0) if isinstance(today, dict) else 0
