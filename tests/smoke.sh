@@ -56,6 +56,7 @@ grep -q 'class="verse-line"' site/kinh-sang*.html
 grep -q 'class="verse-line"' site/kinh-toi*.html
 grep -q 'wide-verse-number' site/style.css
 grep -q '.verse-line > sup' site/style.css
+grep -q 'line-height: 0;' site/style.css
 grep -q 'display: none;' site/style.css
 grep -q 'illuminated-initial' site/style.css
 grep -q 'class="illuminated-initial"' site/kinh-sang*.html

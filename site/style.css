@@ -67,6 +67,13 @@ em,
   font-style: italic;
 }
 
+/* Keep inline verse numbers from enlarging line boxes in Kindle WebKit 534. */
+sup {
+  font-size: 0.65em;
+  line-height: 0;
+  vertical-align: super;
+}
+
 .note {
   font-size: 35px;
   line-height: 1.45;
