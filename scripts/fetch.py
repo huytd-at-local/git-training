@@ -181,6 +181,18 @@ class DaySite:
     debug_lines: list[str]
 
 
+@dataclass(frozen=True)
+class DebugPattern:
+    code: str
+    title: str
+    description: str
+    body_html: str
+
+    @property
+    def filename(self) -> str:
+        return f"{self.code.lower()}.html"
+
+
 def setup_logging(verbose: bool) -> None:
     level = logging.DEBUG if verbose else logging.INFO
     logging.basicConfig(format="%(levelname)s: %(message)s", level=level)
@@ -2150,6 +2162,239 @@ def write_day_site(
             )
 
 
+DEBUG_PROSE = (
+    "Các ngài đã giải thích rõ hơn về sự kiện đó, dựa vào những lý lẽ sâu sắc "
+    "để trình bày ý nghĩa và bản chất của sự kiện, nhất là cho mọi người nhận ra "
+    "tình thương của Thiên Chúa vẫn luôn dẫn dắt dân Người qua mọi thử thách. "
+    "Nhờ lòng tin và niềm hy vọng, chúng ta được mời gọi bước đi trong bình an, "
+    "biết nâng đỡ nhau và cùng hướng lòng về quê trời vĩnh cửu."
+)
+
+DEBUG_VERSE_LINES = [
+    "Xin dẫn con bước trong bình an,",
+    "giữa bao thử thách của cuộc đời.",
+    "Xin cho con vững lòng trông cậy,",
+    "và luôn trung tín bước theo Ngài.",
+]
+
+
+def debug_prose(word_count: int) -> str:
+    source_words = DEBUG_PROSE.split()
+    words = [source_words[index % len(source_words)] for index in range(word_count)]
+    text = " ".join(words)
+    return text[0].upper() + text[1:] + "."
+
+
+def debug_verse(line_count: int) -> str:
+    lines = []
+    for index in range(line_count):
+        line = DEBUG_VERSE_LINES[index % len(DEBUG_VERSE_LINES)]
+        lines.append(f'<span class="verse-line"><span>{html.escape(line)}</span></span>')
+    return '<p class="stanza">' + "".join(lines) + "</p>"
+
+
+def debug_explicit_lines(line_count: int) -> str:
+    lines = [f"Dòng chuẩn {index:02d} - xin ban bình an." for index in range(1, line_count + 1)]
+    return '<p class="debug-line-stack">' + "<br>".join(html.escape(line) for line in lines) + "</p>"
+
+
+def debug_patterns() -> list[DebugPattern]:
+    patterns: list[DebugPattern] = []
+    for index, word_count in enumerate((45, 55, 65, 75, 85, 95, 105, 115), start=1):
+        patterns.append(
+            DebugPattern(
+                f"P{index:02d}",
+                f"Văn xuôi {word_count} từ",
+                "Đo khả năng chứa đoạn văn xuôi liên tục.",
+                f"<p>{html.escape(debug_prose(word_count))}</p>",
+            )
+        )
+
+    for index, line_count in enumerate((8, 10, 12, 14, 16, 18), start=1):
+        patterns.append(
+            DebugPattern(
+                f"V{index:02d}",
+                f"Thơ {line_count} dòng",
+                "Đo dòng thơ dùng cấu trúc verse-line của production.",
+                debug_verse(line_count),
+            )
+        )
+
+    mixed_bodies = [
+        (
+            "Điệp ca và ca vịnh ngắn",
+            '<p class="antiphon"><span class="pre">ĐC:</span> '
+            '<span class="body">Xin dẫn con bước trong bình an.</span></p>'
+            + debug_verse(6),
+        ),
+        (
+            "Tiêu đề, ghi chú và ca vịnh",
+            '<p class="indexing">Tv 23 (24)</p>'
+            '<p class="title">Chúa làm chủ trái đất cùng muôn vật muôn loài</p>'
+            '<p class="note">Cửa trời rộng mở đón Chúa Ki-tô hiển trị.</p>'
+            + debug_verse(6),
+        ),
+        (
+            "Điệp ca, tiêu đề và 8 dòng",
+            '<p class="antiphon"><span class="pre">ĐC:</span> '
+            '<span class="body">Lạy Nữ Vương tinh khiết vẹn toàn.</span></p>'
+            '<p class="indexing">Tv 45 (46)</p>'
+            '<p class="title">Chúa là nơi ẩn náu và sức mạnh của người tín hữu</p>'
+            + debug_verse(8),
+        ),
+        (
+            "Heading và văn xuôi",
+            '<h2>Lời Chúa</h2>'
+            f'<p>{html.escape(debug_prose(70))}</p>',
+        ),
+        (
+            "Hai đoạn văn xuôi",
+            f'<p>{html.escape(debug_prose(48))}</p>'
+            f'<p>{html.escape(debug_prose(58))}</p>',
+        ),
+        (
+            "Cấu trúc hỗn hợp dài",
+            '<p class="antiphon"><span class="pre">ĐC:</span> '
+            '<span class="body">Xin dẫn con bước trong bình an.</span></p>'
+            '<p class="indexing">Tv 23 (24)</p>'
+            '<p class="title">Chúa làm chủ trái đất cùng muôn vật muôn loài</p>'
+            '<p class="note">Cửa trời rộng mở đón Chúa Ki-tô hiển trị.</p>'
+            + debug_verse(8),
+        ),
+    ]
+    for index, (title, body) in enumerate(mixed_bodies, start=1):
+        patterns.append(DebugPattern(f"M{index:02d}", title, "Đo margin và kiểu chữ hỗn hợp.", body))
+
+    for index, line_count in enumerate(range(10, 18), start=1):
+        patterns.append(
+            DebugPattern(
+                f"B{index:02d}",
+                f"Ranh giới {line_count} dòng",
+                "Mỗi mẫu tăng đúng một dòng ngắn để tìm ngưỡng an toàn của nav.",
+                debug_explicit_lines(line_count),
+            )
+        )
+    return patterns
+
+
+def debug_metrics_script() -> str:
+    return """  <script>
+  window.onload = function () {
+    var output = document.getElementById('debug-metrics-output');
+    var main = document.getElementsByTagName('main')[0];
+    var navs = document.getElementsByTagName('nav');
+    var nav = navs.length ? navs[navs.length - 1] : null;
+    var root = document.documentElement;
+    var body = document.body;
+    var lines = [];
+    function add(name, value) { lines.push(name + ': ' + value); }
+    add('userAgent', navigator.userAgent);
+    add('screen', screen.width + ' x ' + screen.height);
+    add('screen.avail', screen.availWidth + ' x ' + screen.availHeight);
+    add('window.inner', window.innerWidth + ' x ' + window.innerHeight);
+    add('document.client', root.clientWidth + ' x ' + root.clientHeight);
+    add('devicePixelRatio', window.devicePixelRatio || 'không hỗ trợ');
+    add('body.scroll', body.scrollWidth + ' x ' + body.scrollHeight);
+    add('main.offset', main.offsetWidth + ' x ' + main.offsetHeight);
+    if (nav) {
+      add('nav.offsetTop', nav.offsetTop);
+      add('nav.offsetHeight', nav.offsetHeight);
+      if (nav.getBoundingClientRect) {
+        var rect = nav.getBoundingClientRect();
+        add('nav.rect', Math.round(rect.top) + ' .. ' + Math.round(rect.bottom));
+        add('nav.bottomGap', Math.round((window.innerHeight || root.clientHeight) - rect.bottom));
+      }
+    }
+    output.innerHTML = '';
+    output.appendChild(document.createTextNode(lines.join('\\n')));
+  };
+  </script>"""
+
+
+def write_debug_site() -> None:
+    debug_dir = SITE_DIR / "debug"
+    debug_dir.mkdir(parents=True, exist_ok=True)
+    for path in debug_dir.glob("*.html"):
+        path.unlink()
+
+    patterns = debug_patterns()
+    groups = [
+        ("Văn xuôi", [pattern for pattern in patterns if pattern.code.startswith("P")]),
+        ("Thơ và ca vịnh", [pattern for pattern in patterns if pattern.code.startswith("V")]),
+        ("Cấu trúc hỗn hợp", [pattern for pattern in patterns if pattern.code.startswith("M")]),
+        ("Tìm ranh giới nav", [pattern for pattern in patterns if pattern.code.startswith("B")]),
+    ]
+    sections = [
+        '<section class="debug-intro">'
+        '<p>Mở trang thông số trước, sau đó thử các mẫu. Không cuộn trang trước khi chụp ảnh.</p>'
+        '<p><a href="metrics.html">Đo thông số trình duyệt Kindle</a></p>'
+        '</section>'
+    ]
+    for heading, group in groups:
+        items = "".join(
+            f'<li><a href="{pattern.filename}"><strong>{pattern.code}</strong> - '
+            f'{html.escape(pattern.title)}</a></li>'
+            for pattern in group
+        )
+        sections.append(f'<h2>{html.escape(heading)}</h2><section class="home-list"><ul>{items}</ul></section>')
+    (debug_dir / "index.html").write_text(
+        page_shell(
+            "Kindle Pagination Debug",
+            "\n".join(sections),
+            "",
+            "",
+            show_metadata=False,
+            css_href="../style.css",
+            bottom_nav='<nav class="page-nav"><a href="../index.html">Về site</a></nav>',
+            body_class="debug-index",
+        ),
+        encoding="utf-8",
+    )
+
+    metrics_nav = page_nav_html(patterns[-1].filename, patterns[0].filename, 1, 1, "index.html")
+    metrics_body = (
+        '<h2>Thông số trình duyệt</h2>'
+        '<p class="note">Chờ vài giây rồi chụp toàn bộ phần số bên dưới. Có thể cuộn để chụp đủ trang này.</p>'
+        '<pre id="debug-metrics-output" class="debug-metrics-output">Đang đo...</pre>'
+    )
+    (debug_dir / "metrics.html").write_text(
+        page_shell(
+            "DEBUG METRICS",
+            metrics_body,
+            "",
+            "",
+            show_metadata=False,
+            show_title=False,
+            page_note="DEBUG METRICS - thông số thiết bị",
+            css_href="../style.css",
+            extra_head=debug_metrics_script(),
+            bottom_nav=metrics_nav,
+            body_class="debug-page debug-metrics",
+        ),
+        encoding="utf-8",
+    )
+
+    for index, pattern in enumerate(patterns):
+        previous_pattern = patterns[index - 1] if index > 0 else patterns[-1]
+        next_pattern = patterns[index + 1] if index + 1 < len(patterns) else patterns[0]
+        nav = page_nav_html(previous_pattern.filename, next_pattern.filename, index + 1, len(patterns), "index.html")
+        (debug_dir / pattern.filename).write_text(
+            page_shell(
+                f"DEBUG {pattern.code}",
+                pattern.body_html,
+                "",
+                "",
+                show_metadata=False,
+                show_title=False,
+                page_note=f"DEBUG {pattern.code} - {pattern.title}",
+                css_href="../style.css",
+                bottom_nav=nav,
+                body_class=f"debug-page debug-{pattern.code.lower()}",
+            ),
+            encoding="utf-8",
+        )
+
+
 def write_site(day_sites: list[DaySite]) -> None:
     SITE_DIR.mkdir(parents=True, exist_ok=True)
     available_date_names = {date_dir_name(site.date) for site in day_sites}
@@ -2197,6 +2442,7 @@ def write_site(day_sites: list[DaySite]) -> None:
         updated,
         "",
     )
+    write_debug_site()
 
 def write_error_page(message: str) -> None:
     SITE_DIR.mkdir(parents=True, exist_ok=True)
@@ -2219,10 +2465,16 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default=SOURCE_URL)
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--debug-only", action="store_true")
     args = parser.parse_args()
     setup_logging(args.verbose)
 
     try:
+        if args.debug_only:
+            SITE_DIR.mkdir(parents=True, exist_ok=True)
+            write_debug_site()
+            logging.info("Generated Kindle calibration pages in %s", (SITE_DIR / "debug").relative_to(ROOT))
+            return 0
         session = requests.Session()
         run_date = datetime.now(VN_TZ)
         source = fetch_source(session, args.url)

@@ -6,6 +6,19 @@ PYTHON_BIN="${PYTHON:-python3}"
 "$PYTHON_BIN" -m compileall scripts
 test -f site/index.html
 test -f site/style.css
+test -f site/debug/index.html
+test -f site/debug/metrics.html
+
+debug_pattern_count=$(find site/debug -type f -name '[pPvVmMbB][0-9][0-9].html' | wc -l | tr -d ' ')
+test "$debug_pattern_count" -eq 28
+grep -q 'window.innerHeight' site/debug/metrics.html
+grep -q 'nav.bottomGap' site/debug/metrics.html
+grep -q 'Đo thông số trình duyệt Kindle' site/debug/index.html
+for file in site/debug/[pPvVmMbB][0-9][0-9].html; do
+  grep -q 'DEBUG [PVMB][0-9][0-9]' "$file"
+  grep -q 'class="page-nav paged-nav"' "$file"
+  grep -q 'Mục lục' "$file"
+done
 
 pages="
 kinh-sach
@@ -110,7 +123,7 @@ for path in Path("site").rglob("*.html"):
         value = initial.get_text("", strip=True)
         if not value or not unicodedata.category(value[0]).startswith("L"):
             raise SystemExit(f"Illuminated initial is not a letter in {path}: {value!r}")
-    if 'class="page-nav paged-nav"' in text:
+    if 'class="page-nav paged-nav"' in text and "debug-page" not in text:
         main = soup.find("main")
         if not main:
             raise SystemExit(f"Missing main in {path}")

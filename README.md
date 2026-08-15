@@ -29,6 +29,19 @@ sh tests/smoke.sh
 
 Hoặc sau khi chạy server local, mở `http://localhost:8000` bằng trình duyệt.
 
+## Hiệu chỉnh phân trang Kindle
+
+Bộ mẫu tại `/debug/` dùng để đo viewport thật và hiệu chỉnh thuật toán phân trang trên Kindle.
+Có thể sinh riêng bộ mẫu mà không gọi website nguồn:
+
+```sh
+python scripts/fetch.py --debug-only
+python -m http.server 8000 -d site
+```
+
+Sau đó mở `http://localhost:8000/debug/`. Bộ mẫu gồm trang thông số trình duyệt và các nhóm
+văn xuôi (`P`), thơ (`V`), cấu trúc hỗn hợp (`M`) và ranh giới thanh điều hướng (`B`).
+
 ## Deploy GitHub Pages
 
 1. Commit toàn bộ file.

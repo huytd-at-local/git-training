@@ -431,6 +431,31 @@ code {
   font-size: 0.85em;
 }
 
+.debug-index .debug-intro {
+  margin-bottom: 28px;
+  padding-bottom: 18px;
+  border-bottom: 2px solid #777;
+}
+
+.debug-index .home-list a {
+  padding-top: 18px;
+  padding-bottom: 18px;
+  font-size: 36px;
+}
+
+.debug-metrics-output {
+  display: block;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+  font-family: "Courier New", monospace;
+  font-size: 25px;
+  line-height: 1.35;
+}
+
+.debug-line-stack {
+  margin-bottom: 16px;
+}
+
 @media (max-width: 520px) {
   body {
     padding: 20px 30px 20px 30px;

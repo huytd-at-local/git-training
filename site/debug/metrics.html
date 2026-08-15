@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DEBUG METRICS</title>
+  <link rel="stylesheet" href="../style.css">
+  <script>
+  window.onload = function () {
+    var output = document.getElementById('debug-metrics-output');
+    var main = document.getElementsByTagName('main')[0];
+    var navs = document.getElementsByTagName('nav');
+    var nav = navs.length ? navs[navs.length - 1] : null;
+    var root = document.documentElement;
+    var body = document.body;
+    var lines = [];
+    function add(name, value) { lines.push(name + ': ' + value); }
+    add('userAgent', navigator.userAgent);
+    add('screen', screen.width + ' x ' + screen.height);
+    add('screen.avail', screen.availWidth + ' x ' + screen.availHeight);
+    add('window.inner', window.innerWidth + ' x ' + window.innerHeight);
+    add('document.client', root.clientWidth + ' x ' + root.clientHeight);
+    add('devicePixelRatio', window.devicePixelRatio || 'không hỗ trợ');
+    add('body.scroll', body.scrollWidth + ' x ' + body.scrollHeight);
+    add('main.offset', main.offsetWidth + ' x ' + main.offsetHeight);
+    if (nav) {
+      add('nav.offsetTop', nav.offsetTop);
+      add('nav.offsetHeight', nav.offsetHeight);
+      if (nav.getBoundingClientRect) {
+        var rect = nav.getBoundingClientRect();
+        add('nav.rect', Math.round(rect.top) + ' .. ' + Math.round(rect.bottom));
+        add('nav.bottomGap', Math.round((window.innerHeight || root.clientHeight) - rect.bottom));
+      }
+    }
+    output.innerHTML = '';
+    output.appendChild(document.createTextNode(lines.join('\n')));
+  };
+  </script>
+</head>
+<body class="debug-page debug-metrics">
+  <main>
+
+    <p class="updated">DEBUG METRICS - thông số thiết bị</p>
+
+    <h2>Thông số trình duyệt</h2><p class="note">Chờ vài giây rồi chụp toàn bộ phần số bên dưới. Có thể cuộn để chụp đủ trang này.</p><pre id="debug-metrics-output" class="debug-metrics-output">Đang đo...</pre>
+    <nav class="page-nav paged-nav"><a class="nav-icon" href="b08.html">&#9664;</a><a class="nav-icon" href="p01.html">&#9654;</a><a class="nav-index" href="index.html">Mục lục</a><a class="nav-icon" href="b08.html">&#9664;</a><a class="nav-icon" href="p01.html">&#9654;</a></nav>
+  </main>
+</body>
+</html>
