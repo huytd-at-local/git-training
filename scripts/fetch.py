@@ -6,6 +6,7 @@ import html
 import json
 import logging
 import re
+import shutil
 import sys
 import unicodedata
 from dataclasses import dataclass
@@ -2149,38 +2150,16 @@ def write_day_site(
             )
 
 
-def root_redirect_script(day_sites: list[DaySite]) -> str:
-    entries = ",".join("'%s'" % site.date.strftime("%Y-%m-%d") for site in day_sites)
-    return f"""  <script>
-  (function() {{
-    var days = [{entries}];
-    var now = new Date();
-    var vn = new Date(now.getTime() + 7 * 60 * 60 * 1000);
-    var y = vn.getUTCFullYear();
-    var m = vn.getUTCMonth() + 1;
-    var d = vn.getUTCDate();
-    var key = y + '-' + (m < 10 ? '0' + m : m) + '-' + (d < 10 ? '0' + d : d);
-    var h = vn.getUTCHours();
-    var slug = 'kinh-toi';
-    if (h < 4) slug = 'kinh-toi';
-    else if (h < 6) slug = 'kinh-sach';
-    else if (h < 8) slug = 'kinh-sang';
-    else if (h < 11) slug = 'kinh-trua-gio-ba';
-    else if (h < 13) slug = 'kinh-trua-gio-sau';
-    else if (h < 17) slug = 'kinh-trua-gio-chin';
-    else if (h < 20) slug = 'kinh-chieu';
-    for (var i = 0; i < days.length; i++) {{
-      if (days[i] === key) {{
-        window.location.replace(days[i] + '/' + slug + '.html');
-        return;
-      }}
-    }}
-  }})();
-  </script>"""
-
-
 def write_site(day_sites: list[DaySite]) -> None:
     SITE_DIR.mkdir(parents=True, exist_ok=True)
+    available_date_names = {date_dir_name(site.date) for site in day_sites}
+    for path in SITE_DIR.iterdir():
+        if (
+            path.is_dir()
+            and re.fullmatch(r"\d{4}-\d{2}-\d{2}", path.name)
+            and path.name not in available_date_names
+        ):
+            shutil.rmtree(path)
     error_page = SITE_DIR / "error.html"
     if error_page.exists():
         error_page.unlink()
@@ -2217,12 +2196,6 @@ def write_site(day_sites: list[DaySite]) -> None:
         available_dates,
         updated,
         "",
-    )
-
-    root_index = SITE_DIR / "index.html"
-    root_index.write_text(
-        root_index.read_text(encoding="utf-8").replace("</head>", root_redirect_script(day_sites) + "\n</head>"),
-        encoding="utf-8",
     )
 
 def write_error_page(message: str) -> None:

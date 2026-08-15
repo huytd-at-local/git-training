@@ -49,9 +49,9 @@ grep -q 'class="illuminated-initial"' site/kinh-sach*.html
 grep -q 'p > .pre' site/style.css
 grep -q 'p > .body' site/style.css
 grep -q '.antiphon .pre' site/style.css
-grep -q 'window.location.replace' site/index.html
-grep -q 'getUTCHours' site/index.html
-! grep -q 'getHours' site/index.html
+! grep -q 'window.location.replace' site/index.html
+! grep -q 'getUTCHours' site/index.html
+! grep -q '<script>' site/index.html
 grep -q 'class="date-nav"' site/index.html
 ! grep -q 'class="date-nav"' site/kinh-sang.html
 ! grep -q 'class="page-count"' site/kinh-sang.html
@@ -72,7 +72,9 @@ from bs4 import BeautifulSoup
 from scripts.fetch import block_units
 
 index_html = Path("site/index.html").read_text(encoding="utf-8")
-current_day_names = set(re.findall(r"'(\d{4}-\d{2}-\d{2})'", index_html))
+current_day_names = set(re.findall(r'href="(\d{4}-\d{2}-\d{2})/index\.html"', index_html))
+if len(current_day_names) != 3:
+    raise SystemExit(f"Expected exactly three day links, found: {sorted(current_day_names)}")
 
 for path in Path("site").rglob("*.html"):
     text = path.read_text(encoding="utf-8")
@@ -307,9 +309,19 @@ for title, slug in [
     if 'class="page-nav paged-nav"' in text or "Trang 2/" in text:
         raise SystemExit(f"Responsive prayer should not be paginated: {path}")
 
-dated_indexes = sorted(Path("site").glob("20??-??-??/index.html"))
-if len(dated_indexes) < 3:
-    raise SystemExit("Expected yesterday/today/tomorrow dated indexes")
+dated_day_names = {
+    path.name
+    for path in Path("site").iterdir()
+    if path.is_dir() and re.fullmatch(r"\d{4}-\d{2}-\d{2}", path.name)
+}
+if dated_day_names != current_day_names:
+    raise SystemExit(
+        f"Dated directories do not match yesterday/today/tomorrow: "
+        f"expected {sorted(current_day_names)}, found {sorted(dated_day_names)}"
+    )
+for day_name in current_day_names:
+    if not (Path("site") / day_name / "index.html").is_file():
+        raise SystemExit(f"Missing dated index for {day_name}")
 
 for path in Path("site").rglob("*.html"):
     soup = BeautifulSoup(path.read_text(encoding="utf-8"), "lxml")

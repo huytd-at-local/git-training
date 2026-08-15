@@ -5,33 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Các Giờ Kinh Phụng Vụ</title>
   <link rel="stylesheet" href="style.css">
-
-  <script>
-  (function() {
-    var days = ['2026-07-02','2026-07-03','2026-07-04'];
-    var now = new Date();
-    var vn = new Date(now.getTime() + 7 * 60 * 60 * 1000);
-    var y = vn.getUTCFullYear();
-    var m = vn.getUTCMonth() + 1;
-    var d = vn.getUTCDate();
-    var key = y + '-' + (m < 10 ? '0' + m : m) + '-' + (d < 10 ? '0' + d : d);
-    var h = vn.getUTCHours();
-    var slug = 'kinh-toi';
-    if (h < 4) slug = 'kinh-toi';
-    else if (h < 6) slug = 'kinh-sach';
-    else if (h < 8) slug = 'kinh-sang';
-    else if (h < 11) slug = 'kinh-trua-gio-ba';
-    else if (h < 13) slug = 'kinh-trua-gio-sau';
-    else if (h < 17) slug = 'kinh-trua-gio-chin';
-    else if (h < 20) slug = 'kinh-chieu';
-    for (var i = 0; i < days.length; i++) {
-      if (days[i] === key) {
-        window.location.replace(days[i] + '/' + slug + '.html');
-        return;
-      }
-    }
-  })();
-  </script>
 </head>
 <body>
   <main>

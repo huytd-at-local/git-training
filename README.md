@@ -39,6 +39,7 @@ Hoặc sau khi chạy server local, mở `http://localhost:8000` bằng trình d
 6. Mở URL GitHub Pages được workflow trả ra.
 
 Workflow cũng tự chạy hằng ngày lúc 00:05 giờ Việt Nam. Cron UTC tương ứng là `5 17 * * *`.
+Mỗi lần tạo site thành công, script chỉ giữ nội dung của hôm qua, hôm nay và ngày mai.
 
 ## Debug lỗi parse
 
