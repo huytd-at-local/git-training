@@ -40,7 +40,8 @@ python -m http.server 8000 -d site
 ```
 
 Sau đó mở `http://localhost:8000/debug/`. Bộ mẫu gồm trang thông số trình duyệt và các nhóm
-văn xuôi (`P`), thơ (`V`), cấu trúc hỗn hợp (`M`) và ranh giới thanh điều hướng (`B`).
+văn xuôi (`P`), thơ trong một stanza (`V`), thơ đúng cấu trúc HTML production (`R`), trang do
+thuật toán phân trang mới chọn (`A`), cấu trúc hỗn hợp (`M`) và ranh giới thanh điều hướng (`B`).
 
 ## Deploy GitHub Pages
 

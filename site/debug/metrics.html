@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DEBUG METRICS</title>
-  <link rel="stylesheet" href="../style.css">
+  <link rel="stylesheet" href="../style.css?debug=2">
   <script>
   window.onload = function () {
     var output = document.getElementById('debug-metrics-output');
@@ -20,6 +20,7 @@
     add('screen.avail', screen.availWidth + ' x ' + screen.availHeight);
     add('window.inner', window.innerWidth + ' x ' + window.innerHeight);
     add('document.client', root.clientWidth + ' x ' + root.clientHeight);
+    add('document.scroll', root.scrollWidth + ' x ' + root.scrollHeight);
     add('devicePixelRatio', window.devicePixelRatio || 'không hỗ trợ');
     add('body.scroll', body.scrollWidth + ' x ' + body.scrollHeight);
     add('main.offset', main.offsetWidth + ' x ' + main.offsetHeight);

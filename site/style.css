@@ -18,6 +18,7 @@ body {
 }
 
 main {
+  display: block;
   max-width: none;
   margin: 0 auto;
 }

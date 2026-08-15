@@ -9,13 +9,15 @@ test -f site/style.css
 test -f site/debug/index.html
 test -f site/debug/metrics.html
 
-debug_pattern_count=$(find site/debug -type f -name '[pPvVmMbB][0-9][0-9].html' | wc -l | tr -d ' ')
-test "$debug_pattern_count" -eq 28
+debug_pattern_count=$(find site/debug -type f -name '[pPvVrRaAmMbB][0-9][0-9].html' | wc -l | tr -d ' ')
+test "$debug_pattern_count" -eq 42
 grep -q 'window.innerHeight' site/debug/metrics.html
 grep -q 'nav.bottomGap' site/debug/metrics.html
+grep -q 'document.scroll' site/debug/metrics.html
 grep -q 'Đo thông số trình duyệt Kindle' site/debug/index.html
-for file in site/debug/[pPvVmMbB][0-9][0-9].html; do
-  grep -q 'DEBUG [PVMB][0-9][0-9]' "$file"
+grep -q 'display: block;' site/style.css
+for file in site/debug/[pPvVrRaAmMbB][0-9][0-9].html; do
+  grep -q 'DEBUG [PVRAMB][0-9][0-9]' "$file"
   grep -q 'class="page-nav paged-nav"' "$file"
   grep -q 'Mục lục' "$file"
 done
@@ -82,7 +84,25 @@ import re
 import unicodedata
 from pathlib import Path
 from bs4 import BeautifulSoup
-from scripts.fetch import block_units
+from scripts.fetch import (
+    PAGE_TARGET_UNITS,
+    block_units,
+    debug_production_verse,
+    debug_prose,
+    debug_verse,
+    text_units,
+)
+
+if text_units(debug_prose(115)) != 11:
+    raise SystemExit("Kindle prose calibration drifted from the measured 48-character line")
+if not block_units(debug_verse(15)) < PAGE_TARGET_UNITS:
+    raise SystemExit("15-line stanza should remain inside the calibrated Kindle budget")
+if not block_units(debug_verse(16)) > PAGE_TARGET_UNITS:
+    raise SystemExit("16-line stanza should exceed the calibrated Kindle budget")
+if not block_units(debug_production_verse(14)) < PAGE_TARGET_UNITS:
+    raise SystemExit("14-line production verse should fit the calibrated Kindle budget")
+if not block_units(debug_production_verse(15)) > PAGE_TARGET_UNITS:
+    raise SystemExit("15-line production verse should exceed the calibrated Kindle budget")
 
 index_html = Path("site/index.html").read_text(encoding="utf-8")
 current_day_names = set(re.findall(r'href="(\d{4}-\d{2}-\d{2})/index\.html"', index_html))

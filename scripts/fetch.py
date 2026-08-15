@@ -71,7 +71,12 @@ PRAYERS = [
 
 PAGE_TARGET_UNITS = 17
 FIRST_PAGE_TARGET_UNITS = 14
-CHARS_PER_READING_LINE = 30
+# Kindle Paperwhite 3 renders roughly 48-50 Vietnamese characters per line in
+# the production CSS. Keep a small safety margin instead of using the measured
+# maximum directly.
+CHARS_PER_READING_LINE = 48
+VERSE_LINE_SPACING_UNITS = 0.10
+VERSE_BLOCK_SPACING_UNITS = 0.20
 MIN_UNITS_BEFORE_HEADING_BREAK = 7
 MIN_PAGE_UNITS = 12
 SPLIT_PARAGRAPH_MIN_LINES = 4
@@ -1692,13 +1697,51 @@ def text_units(text: str) -> int:
     return max(1, (len(normalized) + CHARS_PER_READING_LINE - 1) // CHARS_PER_READING_LINE)
 
 
-def block_units(block_html: str) -> int:
+def block_units(block_html: str) -> float:
     soup = BeautifulSoup(block_html, "lxml")
     text = soup.get_text(" ", strip=True)
     br_count = len(soup.find_all("br"))
     heading_count = len(soup.find_all(["h2", "h3"]))
     explicit_lines = br_count + 1 if text else 0
-    return max(1, max(text_units(text), explicit_lines) + heading_count)
+    base_units = max(text_units(text), explicit_lines)
+
+    # A verse line is a block of its own, so estimating the complete paragraph
+    # as continuous prose can undercount it. Count every displayed verse line
+    # independently and include the small CSS gap after it. Production output
+    # commonly wraps one verse-line in its own <p>, whose bottom margin also
+    # needs a fractional unit.
+    verse_lines = soup.select(".verse-line, .verse-continuation")
+    verse_spacing_units = 0.0
+    if verse_lines:
+        verse_units = 0
+        verse_parents: set[int] = set()
+        for verse_line in verse_lines:
+            verse_text = verse_line.get_text(" ", strip=True)
+            verse_explicit_lines = len(verse_line.find_all("br")) + 1 if verse_text else 0
+            verse_units += max(text_units(verse_text), verse_explicit_lines)
+            parent = verse_line.find_parent("p")
+            if parent is not None:
+                verse_parents.add(id(parent))
+        base_units = max(base_units, verse_units)
+        verse_spacing_units = (
+            len(verse_lines) * VERSE_LINE_SPACING_UNITS
+            + len(verse_parents) * VERSE_BLOCK_SPACING_UNITS
+        )
+
+    # The antiphon label and body are display:block in the Kindle stylesheet.
+    # Count them separately even when their combined text is short.
+    for antiphon in soup.select(".antiphon"):
+        antiphon_units = 0
+        for selector in (".pre", ".body"):
+            part = antiphon.select_one(selector)
+            if part is None:
+                continue
+            part_text = part.get_text(" ", strip=True)
+            part_explicit_lines = len(part.find_all("br")) + 1 if part_text else 0
+            antiphon_units += max(text_units(part_text), part_explicit_lines)
+        base_units = max(base_units, antiphon_units)
+
+    return max(1.0, base_units + heading_count + verse_spacing_units)
 
 
 def is_heading_block(block_html: str) -> bool:
@@ -1707,7 +1750,7 @@ def is_heading_block(block_html: str) -> bool:
     return bool(first and first.get_text(strip=True))
 
 
-def page_units(blocks: list[str]) -> int:
+def page_units(blocks: list[str]) -> float:
     return sum(block_units(block) for block in blocks)
 
 
@@ -1760,11 +1803,14 @@ def render_split_tokens_paragraph(node: Tag, tokens: list[str]) -> str:
     return f'<p class="{class_attr}">{"".join(tokens).strip()}</p>'
 
 
-def split_text_paragraph_to_fit(paragraph: Tag, remaining_units: int) -> tuple[str, str] | None:
+def split_text_paragraph_to_fit(paragraph: Tag, remaining_units: float) -> tuple[str, str] | None:
     if remaining_units < 4:
         return None
 
-    allowed_units = remaining_units + 2
+    # The previous 30-character estimate deliberately allowed two extra units.
+    # With the calibrated 48-character estimate that overshoot can become two
+    # real Kindle lines, so the split must respect the remaining page budget.
+    allowed_units = remaining_units
     tokens = paragraph_text_tokens(paragraph)
     if len(tokens) < 8:
         return None
@@ -1800,7 +1846,7 @@ def split_text_paragraph_to_fit(paragraph: Tag, remaining_units: int) -> tuple[s
     return prefix, suffix
 
 
-def split_block_to_fit(block_html: str, remaining_units: int) -> tuple[str, str] | None:
+def split_block_to_fit(block_html: str, remaining_units: float) -> tuple[str, str] | None:
     if remaining_units < 2:
         return None
 
@@ -2193,6 +2239,21 @@ def debug_verse(line_count: int) -> str:
     return '<p class="stanza">' + "".join(lines) + "</p>"
 
 
+def debug_production_verse(line_count: int) -> str:
+    """Render verse blocks exactly as html_blocks() emits production pages."""
+    paragraphs: list[str] = []
+    for start in range(0, line_count, 2):
+        block_lines = [
+            DEBUG_VERSE_LINES[index % len(DEBUG_VERSE_LINES)]
+            for index in range(start, min(start + 2, line_count))
+        ]
+        verse_body = "<br/>".join(html.escape(line) for line in block_lines)
+        paragraphs.append(
+            '<p><span class="verse-line"><span>' + verse_body + "</span></span></p>"
+        )
+    return "".join(paragraphs)
+
+
 def debug_explicit_lines(line_count: int) -> str:
     lines = [f"Dòng chuẩn {index:02d} - xin ban bình an." for index in range(1, line_count + 1)]
     return '<p class="debug-line-stack">' + "<br>".join(html.escape(line) for line in lines) + "</p>"
@@ -2200,7 +2261,8 @@ def debug_explicit_lines(line_count: int) -> str:
 
 def debug_patterns() -> list[DebugPattern]:
     patterns: list[DebugPattern] = []
-    for index, word_count in enumerate((45, 55, 65, 75, 85, 95, 105, 115), start=1):
+    prose_word_counts = (45, 55, 65, 75, 85, 95, 105, 115, 130, 145, 160, 175, 190)
+    for index, word_count in enumerate(prose_word_counts, start=1):
         patterns.append(
             DebugPattern(
                 f"P{index:02d}",
@@ -2210,13 +2272,54 @@ def debug_patterns() -> list[DebugPattern]:
             )
         )
 
-    for index, line_count in enumerate((8, 10, 12, 14, 16, 18), start=1):
+    verse_patterns = (
+        ("V01", 8),
+        ("V02", 10),
+        ("V03", 12),
+        ("V04", 14),
+        ("V07", 15),
+        ("V05", 16),
+        ("V06", 18),
+    )
+    for code, line_count in verse_patterns:
         patterns.append(
             DebugPattern(
-                f"V{index:02d}",
+                code,
                 f"Thơ {line_count} dòng",
-                "Đo dòng thơ dùng cấu trúc verse-line của production.",
+                (
+                    "Mẫu bổ sung để xác nhận ranh giới giữa V04 và V05."
+                    if code == "V07"
+                    else "Đo dòng thơ dùng cấu trúc verse-line của production."
+                ),
                 debug_verse(line_count),
+            )
+        )
+
+    for index, line_count in enumerate((12, 14, 15, 16), start=1):
+        patterns.append(
+            DebugPattern(
+                f"R{index:02d}",
+                f"Thơ production {line_count} dòng",
+                "Mỗi cặp dòng nằm trong một thẻ p riêng, giống HTML sau phân trang.",
+                debug_production_verse(line_count),
+            )
+        )
+
+    algorithm_pages = [
+        ("văn xuôi", page)
+        for page in paginate_html(f'<p>{html.escape(debug_prose(420))}</p>')[:2]
+    ] + [
+        ("thơ production", page)
+        for page in paginate_html(debug_production_verse(40))[:2]
+    ]
+    for index, (content_type, body) in enumerate(algorithm_pages, start=1):
+        units = page_units(html_blocks(body))
+        patterns.append(
+            DebugPattern(
+                f"A{index:02d}",
+                f"Thuật toán chọn {content_type} ({units:.1f} đơn vị)",
+                "Nội dung trang này được tạo trực tiếp bởi paginate_html().",
+                body,
             )
         )
 
@@ -2293,6 +2396,7 @@ def debug_metrics_script() -> str:
     add('screen.avail', screen.availWidth + ' x ' + screen.availHeight);
     add('window.inner', window.innerWidth + ' x ' + window.innerHeight);
     add('document.client', root.clientWidth + ' x ' + root.clientHeight);
+    add('document.scroll', root.scrollWidth + ' x ' + root.scrollHeight);
     add('devicePixelRatio', window.devicePixelRatio || 'không hỗ trợ');
     add('body.scroll', body.scrollWidth + ' x ' + body.scrollHeight);
     add('main.offset', main.offsetWidth + ' x ' + main.offsetHeight);
@@ -2321,6 +2425,8 @@ def write_debug_site() -> None:
     groups = [
         ("Văn xuôi", [pattern for pattern in patterns if pattern.code.startswith("P")]),
         ("Thơ và ca vịnh", [pattern for pattern in patterns if pattern.code.startswith("V")]),
+        ("Thơ đúng cấu trúc production", [pattern for pattern in patterns if pattern.code.startswith("R")]),
+        ("Trang do thuật toán mới chọn", [pattern for pattern in patterns if pattern.code.startswith("A")]),
         ("Cấu trúc hỗn hợp", [pattern for pattern in patterns if pattern.code.startswith("M")]),
         ("Tìm ranh giới nav", [pattern for pattern in patterns if pattern.code.startswith("B")]),
     ]
@@ -2344,7 +2450,7 @@ def write_debug_site() -> None:
             "",
             "",
             show_metadata=False,
-            css_href="../style.css",
+            css_href="../style.css?debug=2",
             bottom_nav='<nav class="page-nav"><a href="../index.html">Về site</a></nav>',
             body_class="debug-index",
         ),
@@ -2366,7 +2472,7 @@ def write_debug_site() -> None:
             show_metadata=False,
             show_title=False,
             page_note="DEBUG METRICS - thông số thiết bị",
-            css_href="../style.css",
+            css_href="../style.css?debug=2",
             extra_head=debug_metrics_script(),
             bottom_nav=metrics_nav,
             body_class="debug-page debug-metrics",
@@ -2387,7 +2493,7 @@ def write_debug_site() -> None:
                 show_metadata=False,
                 show_title=False,
                 page_note=f"DEBUG {pattern.code} - {pattern.title}",
-                css_href="../style.css",
+                css_href="../style.css?debug=2",
                 bottom_nav=nav,
                 body_class=f"debug-page debug-{pattern.code.lower()}",
             ),
