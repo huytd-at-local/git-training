@@ -69,14 +69,21 @@ PRAYERS = [
     ("Kinh Tối", "kinh-toi"),
 ]
 
-PAGE_TARGET_UNITS = 17
-FIRST_PAGE_TARGET_UNITS = 14
+PAGE_TARGET_UNITS = 17.4
+FIRST_PAGE_TARGET_UNITS = 14.4
 # Kindle Paperwhite 3 renders roughly 48-50 Vietnamese characters per line in
 # the production CSS. Keep a small safety margin instead of using the measured
 # maximum directly.
 CHARS_PER_READING_LINE = 48
 VERSE_LINE_SPACING_UNITS = 0.10
-VERSE_BLOCK_SPACING_UNITS = 0.20
+# Fractional line-height costs derived from the production CSS at 40px with a
+# 1.46 line-height: a normal paragraph has 16px of bottom margin, a paragraph
+# created by the splitter has 10px, and a stanza has 20px.  Counting these is
+# important for pages made from many short paragraphs: their text lines may fit
+# while the accumulated margins still push the navigation below the viewport.
+PARAGRAPH_SPACING_UNITS = 0.27
+SPLIT_PARAGRAPH_SPACING_UNITS = 0.17
+STANZA_SPACING_UNITS = 0.34
 MIN_UNITS_BEFORE_HEADING_BREAK = 7
 MIN_PAGE_UNITS = 12
 SPLIT_PARAGRAPH_MIN_LINES = 4
@@ -1714,19 +1721,23 @@ def block_units(block_html: str) -> float:
     verse_spacing_units = 0.0
     if verse_lines:
         verse_units = 0
-        verse_parents: set[int] = set()
         for verse_line in verse_lines:
             verse_text = verse_line.get_text(" ", strip=True)
             verse_explicit_lines = len(verse_line.find_all("br")) + 1 if verse_text else 0
             verse_units += max(text_units(verse_text), verse_explicit_lines)
-            parent = verse_line.find_parent("p")
-            if parent is not None:
-                verse_parents.add(id(parent))
         base_units = max(base_units, verse_units)
-        verse_spacing_units = (
-            len(verse_lines) * VERSE_LINE_SPACING_UNITS
-            + len(verse_parents) * VERSE_BLOCK_SPACING_UNITS
+        verse_spacing_units = len(verse_lines) * VERSE_LINE_SPACING_UNITS
+
+    paragraph_spacing_units = 0.0
+    for paragraph in soup.find_all("p"):
+        classes = set(paragraph.get("class", []))
+        paragraph_spacing_units += (
+            SPLIT_PARAGRAPH_SPACING_UNITS
+            if "split-block" in classes
+            else PARAGRAPH_SPACING_UNITS
         )
+
+    stanza_spacing_units = len(soup.select(".stanza")) * STANZA_SPACING_UNITS
 
     # The antiphon label and body are display:block in the Kindle stylesheet.
     # Count them separately even when their combined text is short.
@@ -1741,7 +1752,14 @@ def block_units(block_html: str) -> float:
             antiphon_units += max(text_units(part_text), part_explicit_lines)
         base_units = max(base_units, antiphon_units)
 
-    return max(1.0, base_units + heading_count + verse_spacing_units)
+    return max(
+        1.0,
+        base_units
+        + heading_count
+        + verse_spacing_units
+        + paragraph_spacing_units
+        + stanza_spacing_units,
+    )
 
 
 def is_heading_block(block_html: str) -> bool:

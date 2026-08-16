@@ -43,6 +43,24 @@ Sau đó mở `http://localhost:8000/debug/`. Bộ mẫu gồm trang thông số
 văn xuôi (`P`), thơ trong một stanza (`V`), thơ đúng cấu trúc HTML production (`R`), trang do
 thuật toán phân trang mới chọn (`A`), cấu trúc hỗn hợp (`M`) và ranh giới thanh điều hướng (`B`).
 
+### Mô phỏng Kindle trong Chrome DevTools
+
+Trong DevTools, bật **Device Toolbar**, chọn **Edit > Add custom device** rồi dùng:
+
+- Tên: `Kindle Paperwhite 3 - GKPv`
+- Viewport: `1072 x 1268` CSS pixels
+- Device pixel ratio: `1.7964`
+- Device type: `Desktop (touch)`
+- User agent: `Mozilla/5.0 (X11; ; U; Linux armv7l; en-us) AppleWebKit/534.26+ (KHTML, like Gecko) Version/5.0 Safari/534.26+`
+
+Chọn thiết bị vừa tạo và để mức zoom của Device Toolbar ở `Fit`. Dùng chiều cao `1268`
+(kích thước `document.client` đã đo), không dùng toàn bộ chiều cao màn hình `1448` vì phần
+giao diện trình duyệt Kindle chiếm phần còn lại. DPR chủ yếu giúp JavaScript và ảnh chụp gần
+với thiết bị; kích thước `1072 x 1268` mới là thông số quyết định việc xuống dòng.
+
+Đây là mô phỏng gần đúng để phát hiện trang tràn và thanh điều hướng bị đẩy khỏi viewport.
+Chrome vẫn dùng rendering engine hiện đại nên kết quả cuối cùng phải được xác nhận trên Kindle.
+
 ## Deploy GitHub Pages
 
 1. Commit toàn bộ file.

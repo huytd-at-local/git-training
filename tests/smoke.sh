@@ -91,6 +91,8 @@ from scripts.fetch import (
     debug_production_verse,
     debug_prose,
     debug_verse,
+    html_blocks,
+    page_units,
     text_units,
 )
 
@@ -104,6 +106,22 @@ if not block_units(debug_production_verse(14)) < PAGE_TARGET_UNITS:
     raise SystemExit("14-line production verse should fit the calibrated Kindle budget")
 if not block_units(debug_production_verse(15)) > PAGE_TARGET_UNITS:
     raise SystemExit("15-line production verse should exceed the calibrated Kindle budget")
+
+# Regression for 2026-08-16 Kinh Sang 19/23: its 17 visible lines were split
+# across seven paragraphs. The old model counted only the lines and ignored
+# 7 x 16px of paragraph margins, leaving the bottom navigation below the
+# initial Kindle viewport.
+fragmented_lines = "".join(
+    "<p>" + "<br>".join(f"Dong {line}" for line in range(1, count + 1)) + "</p>"
+    for count in (3, 3, 2, 2, 3, 2, 2)
+)
+single_paragraph_lines = "<p>" + "<br>".join(
+    f"Dong {line}" for line in range(1, 18)
+) + "</p>"
+if not page_units(html_blocks(single_paragraph_lines)) <= PAGE_TARGET_UNITS:
+    raise SystemExit("A single 17-line paragraph should retain the measured Kindle capacity")
+if not page_units(html_blocks(fragmented_lines)) > PAGE_TARGET_UNITS:
+    raise SystemExit("Paragraph margins must push the fragmented 17-line regression over budget")
 
 index_html = Path("site/index.html").read_text(encoding="utf-8")
 current_day_names = set(re.findall(r'href="(\d{4}-\d{2}-\d{2})/index\.html"', index_html))
