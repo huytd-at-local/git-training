@@ -69,6 +69,94 @@ PRAYERS = [
     ("Kinh Tối", "kinh-toi"),
 ]
 
+BREVIARY_CSS = """
+/* Monastic Breviary: ornament only; production pagination metrics stay unchanged. */
+    .breviary-page {
+      color: #0d0d0d;
+      background: #fff;
+    }
+
+    .breviary-page h1,
+    .breviary-page h2,
+    .breviary-page h3,
+    .breviary-page .liturgical-day,
+    .breviary-page .page-nav {
+      position: relative;
+    }
+
+    .breviary-page h1 {
+      letter-spacing: 0.035em;
+      text-transform: uppercase;
+    }
+
+    .breviary-first h1:before,
+    .breviary-index h1:before {
+      content: "✠";
+      position: absolute;
+      top: -0.82em;
+      left: 0;
+      width: 100%;
+      color: #8b0000;
+      font-size: 0.62em;
+      line-height: 1;
+      text-align: center;
+    }
+
+    .breviary-page h2:before,
+    .breviary-page h3:before {
+      content: "✠";
+      position: absolute;
+      left: -0.76em;
+      color: #8b0000;
+      font-size: 0.68em;
+      font-weight: normal;
+    }
+
+    .breviary-page .pre,
+    .breviary-page .label,
+    .breviary-page .illuminated-initial {
+      color: #8b0000;
+    }
+
+    .breviary-page .liturgical-day:after,
+    .breviary-page .page-nav:last-child:before {
+      content: "✠";
+      position: absolute;
+      left: 46%;
+      width: 8%;
+      color: #8b0000;
+      background: #fff;
+      font-size: 0.72em;
+      font-weight: normal;
+      line-height: 1;
+      text-align: center;
+    }
+
+    .breviary-page .liturgical-day:after {
+      bottom: -0.52em;
+    }
+
+    .breviary-page .page-nav:last-child:before {
+      top: -0.52em;
+    }
+
+    .breviary-page .page-nav a,
+    .breviary-page .page-nav span {
+      border-color: transparent;
+    }
+
+    .breviary-page .paged-nav .nav-icon {
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 46px;
+      font-weight: normal;
+    }
+
+    .breviary-page .nav-index {
+      font-variant: small-caps;
+      letter-spacing: 0.035em;
+    }
+"""
+
 PAGE_TARGET_UNITS = 17.4
 FIRST_PAGE_TARGET_UNITS = 14.4
 # Kindle Paperwhite 3 renders roughly 48-50 Vietnamese characters per line in
@@ -2076,6 +2164,32 @@ def page_nav_html(
     )
 
 
+def breviary_page_nav_html(
+    previous_href: str | None,
+    next_href: str | None,
+    index_href: str = "index.html",
+) -> str:
+    previous_item = (
+        f'<a class="nav-icon" href="{previous_href}">&#8249;</a>'
+        if previous_href
+        else '<span class="nav-icon">&#8249;</span>'
+    )
+    next_item = (
+        f'<a class="nav-icon" href="{next_href}">&#8250;</a>'
+        if next_href
+        else '<span class="nav-icon">&#8250;</span>'
+    )
+    return (
+        '<nav class="page-nav paged-nav breviary-nav">'
+        f"{previous_item}"
+        f"{next_item}"
+        f'<a class="nav-index" href="{index_href}">Mục lục</a>'
+        f"{previous_item}"
+        f"{next_item}"
+        "</nav>"
+    )
+
+
 def responsive_page_nav_html(
     previous_prayer: Prayer | None,
     next_prayer: Prayer | None,
@@ -2109,6 +2223,7 @@ def write_day_site(
     available_dates: list[datetime],
     updated: str,
     from_dir: str,
+    paginated: dict[str, list[str]] | None = None,
 ) -> None:
     target_dir.mkdir(parents=True, exist_ok=True)
     for _, slug in PRAYERS:
@@ -2125,7 +2240,7 @@ def write_day_site(
   </ul>
 </section>
 <p class="kindle-note">Phiên bản này dành cho trình duyệt web tối giản của Kindle.</p>
-<p class="mode-switch"><a href="index-responsive.html">Mở bản responsive</a></p>
+<p class="mode-switch"><a href="index-responsive.html">Mở bản responsive</a> <a href="{('breviary/index.html' if not from_dir else '../breviary/' + from_dir + '/index.html')}">Mở bản Breviary</a></p>
 """
     (target_dir / "index.html").write_text(
         page_shell(
@@ -2186,7 +2301,8 @@ def write_day_site(
             encoding="utf-8",
         )
 
-    paginated = {prayer.slug: paginate_html(prayer.body_html) for prayer in ordered}
+    if paginated is None:
+        paginated = {prayer.slug: paginate_html(prayer.body_html) for prayer in ordered}
     for index, prayer in enumerate(ordered):
         pages = paginated[prayer.slug]
         page_count = len(pages)
@@ -2221,6 +2337,95 @@ def write_day_site(
                     page_note=page_note,
                     css_href=css_href,
                     bottom_nav=nav,
+                ),
+                encoding="utf-8",
+            )
+
+
+def write_breviary_day_site(
+    target_dir: Path,
+    css_href: str,
+    prayers: list[Prayer],
+    liturgical_day: LiturgicalDay | None,
+    date: datetime,
+    available_dates: list[datetime],
+    updated: str,
+    from_dir: str,
+    paginated: dict[str, list[str]],
+) -> None:
+    """Write the Breviary skin without recalculating any pagination."""
+    target_dir.mkdir(parents=True, exist_ok=True)
+    for _, slug in PRAYERS:
+        for path in target_dir.glob(f"{slug}*.html"):
+            path.unlink()
+
+    index_items = "\n".join(
+        f'<li><a href="{slug}.html">{html.escape(title)}</a></li>' for title, slug in PRAYERS
+    )
+    original_index_href = f"../../{from_dir}/index.html" if from_dir else "../index.html"
+    index_body = f"""
+{date_nav_html(date, available_dates, from_dir)}
+<section class="home-list">
+  <ul>
+    {index_items}
+  </ul>
+</section>
+<p class="kindle-note">Monastic Breviary · bản tối giản dành cho Kindle.</p>
+<p class="mode-switch"><a href="{original_index_href}">Trở về bản Kindle</a></p>
+"""
+    (target_dir / "index.html").write_text(
+        page_shell(
+            "Các Giờ Kinh Phụng Vụ",
+            index_body,
+            updated,
+            "",
+            liturgical_day,
+            css_href=css_href,
+            bottom_nav="",
+            body_class="breviary-page breviary-index",
+        ),
+        encoding="utf-8",
+    )
+
+    prayer_by_slug = {prayer.slug: prayer for prayer in prayers}
+    ordered = [prayer_by_slug[slug] for _, slug in PRAYERS]
+    for index, prayer in enumerate(ordered):
+        pages = paginated[prayer.slug]
+        page_count = len(pages)
+        for page_index, page_body in enumerate(pages, start=1):
+            previous_href = None
+            next_href = None
+
+            if page_index > 1:
+                previous_href = prayer_page_filename(prayer.slug, page_index - 1)
+            elif index > 0:
+                previous_prayer = ordered[index - 1]
+                previous_href = prayer_page_filename(
+                    previous_prayer.slug, len(paginated[previous_prayer.slug])
+                )
+
+            if page_index < page_count:
+                next_href = prayer_page_filename(prayer.slug, page_index + 1)
+            elif index + 1 < len(ordered):
+                next_prayer = ordered[index + 1]
+                next_href = prayer_page_filename(next_prayer.slug, 1)
+
+            nav = breviary_page_nav_html(previous_href, next_href)
+            page_note = f"{prayer.title} {page_index}/{page_count}" if page_index > 1 else ""
+            body_class = "breviary-page breviary-first" if page_index == 1 else "breviary-page"
+            (target_dir / prayer_page_filename(prayer.slug, page_index)).write_text(
+                page_shell(
+                    prayer.title,
+                    page_body,
+                    updated,
+                    "",
+                    prayer.liturgical_day or liturgical_day,
+                    show_metadata=page_index == 1,
+                    show_title=page_index == 1,
+                    page_note=page_note,
+                    css_href=css_href,
+                    bottom_nav=nav,
+                    body_class=body_class,
                 ),
                 encoding="utf-8",
             )
@@ -2521,6 +2726,7 @@ def write_debug_site() -> None:
 
 def write_site(day_sites: list[DaySite]) -> None:
     SITE_DIR.mkdir(parents=True, exist_ok=True)
+    write_breviary_stylesheet()
     available_date_names = {date_dir_name(site.date) for site in day_sites}
     for path in SITE_DIR.iterdir():
         if (
@@ -2540,20 +2746,48 @@ def write_site(day_sites: list[DaySite]) -> None:
         if day_dir.exists():
             for path in day_dir.glob("*.html"):
                 path.unlink()
+    breviary_dir = SITE_DIR / "breviary"
+    if breviary_dir.exists():
+        for path in breviary_dir.iterdir():
+            if (
+                path.is_dir()
+                and re.fullmatch(r"\d{4}-\d{2}-\d{2}", path.name)
+                and path.name not in available_date_names
+            ):
+                shutil.rmtree(path)
 
     updated = datetime.now(VN_TZ).strftime("%d/%m/%Y %H:%M giờ Việt Nam")
     available_dates = [site.date for site in day_sites]
     today = day_sites[len(day_sites) // 2]
+    paginated_by_date = {
+        date_dir_name(site.date): {
+            prayer.slug: paginate_html(prayer.body_html) for prayer in site.prayers
+        }
+        for site in day_sites
+    }
     for site in day_sites:
+        date_name = date_dir_name(site.date)
         write_day_site(
-            SITE_DIR / date_dir_name(site.date),
+            SITE_DIR / date_name,
             "../style.css",
             site.prayers,
             site.liturgical_day,
             site.date,
             available_dates,
             updated,
-            date_dir_name(site.date),
+            date_name,
+            paginated_by_date[date_name],
+        )
+        write_breviary_day_site(
+            SITE_DIR / "breviary" / date_name,
+            "../../breviary.css",
+            site.prayers,
+            site.liturgical_day,
+            site.date,
+            available_dates,
+            updated,
+            date_name,
+            paginated_by_date[date_name],
         )
 
     write_day_site(
@@ -2565,8 +2799,121 @@ def write_site(day_sites: list[DaySite]) -> None:
         available_dates,
         updated,
         "",
+        paginated_by_date[date_dir_name(today.date)],
+    )
+    write_breviary_day_site(
+        SITE_DIR / "breviary",
+        "../breviary.css",
+        today.prayers,
+        today.liturgical_day,
+        today.date,
+        available_dates,
+        updated,
+        "",
+        paginated_by_date[date_dir_name(today.date)],
     )
     write_debug_site()
+
+
+def breviary_snapshot_html(
+    source: str,
+    *,
+    body_class: str,
+    css_href: str,
+    original_index_href: str | None = None,
+) -> str:
+    """Apply the Breviary shell while leaving the paginated content untouched."""
+    result = re.sub(
+        r'(<link rel="stylesheet" href=")[^"]+("[^>]*>)',
+        rf"\g<1>{css_href}\2",
+        source,
+        count=1,
+    )
+    result = result.replace("<body>", f'<body class="{body_class}">', 1)
+    result = result.replace(
+        'class="page-nav paged-nav"',
+        'class="page-nav paged-nav breviary-nav"',
+    )
+    result = result.replace("&#9664;", "&#8249;").replace("&#9654;", "&#8250;")
+    if original_index_href is not None:
+        result = re.sub(
+            r'<p class="kindle-note">.*?</p>',
+            '<p class="kindle-note">Monastic Breviary · bản tối giản dành cho Kindle.</p>',
+            result,
+            count=1,
+            flags=re.DOTALL,
+        )
+        result = re.sub(
+            r'<p class="mode-switch">.*?</p>',
+            f'<p class="mode-switch"><a href="{original_index_href}">Trở về bản Kindle</a></p>',
+            result,
+            count=1,
+            flags=re.DOTALL,
+        )
+    return result
+
+
+def write_breviary_snapshot() -> None:
+    """Create /breviary from committed pages without fetching or touching root."""
+    write_breviary_stylesheet()
+    target_root = SITE_DIR / "breviary"
+    if target_root.exists():
+        shutil.rmtree(target_root)
+
+    source_roots = [SITE_DIR]
+    source_roots.extend(
+        sorted(
+            path
+            for path in SITE_DIR.iterdir()
+            if path.is_dir() and re.fullmatch(r"\d{4}-\d{2}-\d{2}", path.name)
+        )
+    )
+    for source_root in source_roots:
+        is_dated = source_root != SITE_DIR
+        target_dir = target_root / source_root.name if is_dated else target_root
+        target_dir.mkdir(parents=True, exist_ok=True)
+        css_href = "../../breviary.css" if is_dated else "../breviary.css"
+        original_index_href = (
+            f"../../{source_root.name}/index.html" if is_dated else "../index.html"
+        )
+
+        index_source = (source_root / "index.html").read_text(encoding="utf-8")
+        (target_dir / "index.html").write_text(
+            breviary_snapshot_html(
+                index_source,
+                body_class="breviary-page breviary-index",
+                css_href=css_href,
+                original_index_href=original_index_href,
+            ),
+            encoding="utf-8",
+        )
+
+        for _, slug in PRAYERS:
+            for source_path in sorted(source_root.glob(f"{slug}*.html")):
+                if source_path.name.endswith("-responsive.html"):
+                    continue
+                page_number_match = re.search(r"-(\d+)\.html$", source_path.name)
+                body_class = (
+                    "breviary-page" if page_number_match else "breviary-page breviary-first"
+                )
+                (target_dir / source_path.name).write_text(
+                    breviary_snapshot_html(
+                        source_path.read_text(encoding="utf-8"),
+                        body_class=body_class,
+                        css_href=css_href,
+                    ),
+                    encoding="utf-8",
+                )
+
+    logging.info("Generated Breviary snapshot in %s", target_root.relative_to(ROOT))
+
+
+def write_breviary_stylesheet() -> None:
+    base_css = (SITE_DIR / "style.css").read_text(encoding="utf-8").rstrip()
+    (SITE_DIR / "breviary.css").write_text(
+        f"{base_css}\n\n{BREVIARY_CSS.lstrip()}",
+        encoding="utf-8",
+    )
 
 def write_error_page(message: str) -> None:
     SITE_DIR.mkdir(parents=True, exist_ok=True)
@@ -2590,6 +2937,7 @@ def main() -> int:
     parser.add_argument("--url", default=SOURCE_URL)
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--debug-only", action="store_true")
+    parser.add_argument("--breviary-only", action="store_true")
     args = parser.parse_args()
     setup_logging(args.verbose)
 
@@ -2598,6 +2946,9 @@ def main() -> int:
             SITE_DIR.mkdir(parents=True, exist_ok=True)
             write_debug_site()
             logging.info("Generated Kindle calibration pages in %s", (SITE_DIR / "debug").relative_to(ROOT))
+            return 0
+        if args.breviary_only:
+            write_breviary_snapshot()
             return 0
         session = requests.Session()
         run_date = datetime.now(VN_TZ)

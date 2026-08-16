@@ -8,6 +8,8 @@ test -f site/index.html
 test -f site/style.css
 test -f site/debug/index.html
 test -f site/debug/metrics.html
+test -f site/breviary/index.html
+test -f site/breviary/kinh-sang.html
 
 debug_pattern_count=$(find site/debug -type f -name '[pPvVrRaAmMbB][0-9][0-9].html' | wc -l | tr -d ' ')
 test "$debug_pattern_count" -eq 42
@@ -399,6 +401,51 @@ for path in Path("site").glob("*.html"):
     text = path.read_text(encoding="utf-8")
     if text.count("Chúa Nhật Tuần XI - Mùa Thường Niên") > 1:
         raise SystemExit(f"Repeated liturgical title in {path}")
+
+# The Breviary skin must consume the exact same page fragments as the original
+# Kindle mode. Only its shell classes, ornaments, and navigation may differ.
+for root in [Path("site"), *(Path("site") / name for name in current_day_names)]:
+    breviary_root = Path("site/breviary") if root == Path("site") else Path("site/breviary") / root.name
+    original_pages = {}
+    for path in root.glob("kinh-*.html"):
+        text = path.read_text(encoding="utf-8")
+        if 'class="page-nav paged-nav"' in text:
+            original_pages[path.name] = path
+    breviary_pages = {path.name: path for path in breviary_root.glob("kinh-*.html")}
+    if set(original_pages) != set(breviary_pages):
+        raise SystemExit(f"Breviary page boundaries differ in {breviary_root}")
+    for name, original_path in original_pages.items():
+        original_soup = BeautifulSoup(original_path.read_text(encoding="utf-8"), "lxml")
+        breviary_soup = BeautifulSoup(breviary_pages[name].read_text(encoding="utf-8"), "lxml")
+        for soup in (original_soup, breviary_soup):
+            for nav in soup.select("nav.page-nav"):
+                nav.decompose()
+        if original_soup.main.decode_contents().strip() != breviary_soup.main.decode_contents().strip():
+            raise SystemExit(f"Breviary content drifted from original page: {breviary_pages[name]}")
+
+breviary_first = Path("site/breviary/kinh-sang.html").read_text(encoding="utf-8")
+breviary_second = Path("site/breviary/kinh-sang-2.html").read_text(encoding="utf-8")
+breviary_first_soup = BeautifulSoup(breviary_first, "lxml")
+breviary_second_soup = BeautifulSoup(breviary_second, "lxml")
+if set(breviary_first_soup.body.get("class", [])) != {"breviary-page", "breviary-first"}:
+    raise SystemExit("Breviary first page missing distinct first-page treatment")
+if set(breviary_second_soup.body.get("class", [])) != {"breviary-page"}:
+    raise SystemExit("Breviary continuation page should return to the minimal treatment")
+if "&#8249;" not in breviary_second or "&#8250;" not in breviary_second:
+    raise SystemExit("Breviary navigation missing lightweight chevrons")
+if "&#9664;" in breviary_second or "&#9654;" in breviary_second:
+    raise SystemExit("Breviary navigation retained modern solid arrows")
+breviary_soup = BeautifulSoup(breviary_first, "lxml")
+if len(breviary_soup.find_all("link", rel="stylesheet")) != 1:
+    raise SystemExit("Breviary pages must keep exactly one stylesheet request")
+stylesheet_href = breviary_soup.find("link", rel="stylesheet").get("href")
+if stylesheet_href != "../breviary.css":
+    raise SystemExit(f"Breviary page uses unexpected stylesheet: {stylesheet_href}")
+breviary_css = Path("site/breviary.css").read_text(encoding="utf-8")
+if "✠" not in breviary_css or "url(" in breviary_css or "@import" in breviary_css:
+    raise SystemExit("Breviary ornaments must be request-free CSS and Unicode")
+if breviary_soup.find("style"):
+    raise SystemExit("Breviary page should not duplicate shared CSS inline")
 PY
 
 if test -f build/kinh-toi.json; then

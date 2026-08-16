@@ -20,6 +20,19 @@ Mở:
 http://localhost:8000
 ```
 
+Chế độ **Monastic Breviary** dành cho Kindle nằm tại:
+
+```text
+http://localhost:8000/breviary/
+```
+
+Nếu chỉ cần sinh lại chế độ này từ các trang hiện có mà không tải dữ liệu mới
+hoặc thay đổi root:
+
+```sh
+python scripts/fetch.py --breviary-only
+```
+
 ## Test
 
 ```sh
