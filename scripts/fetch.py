@@ -106,10 +106,12 @@ BREVIARY_CSS = """
     .breviary-page h3:before {
       content: "✠";
       position: absolute;
-      left: -0.76em;
+      right: 100%;
+      margin-right: 0.22em;
       color: #8b0000;
       font-size: 0.68em;
       font-weight: normal;
+      white-space: nowrap;
     }
 
     .breviary-page .pre,
@@ -156,6 +158,7 @@ BREVIARY_CSS = """
       letter-spacing: 0.035em;
     }
 """
+BREVIARY_CSS_VERSION = "2"
 
 PAGE_TARGET_UNITS = 17.4
 FIRST_PAGE_TARGET_UNITS = 14.4
@@ -2780,7 +2783,7 @@ def write_site(day_sites: list[DaySite]) -> None:
         )
         write_breviary_day_site(
             SITE_DIR / "breviary" / date_name,
-            "../../breviary.css",
+            f"../../breviary.css?v={BREVIARY_CSS_VERSION}",
             site.prayers,
             site.liturgical_day,
             site.date,
@@ -2803,7 +2806,7 @@ def write_site(day_sites: list[DaySite]) -> None:
     )
     write_breviary_day_site(
         SITE_DIR / "breviary",
-        "../breviary.css",
+        f"../breviary.css?v={BREVIARY_CSS_VERSION}",
         today.prayers,
         today.liturgical_day,
         today.date,
@@ -2872,7 +2875,11 @@ def write_breviary_snapshot() -> None:
         is_dated = source_root != SITE_DIR
         target_dir = target_root / source_root.name if is_dated else target_root
         target_dir.mkdir(parents=True, exist_ok=True)
-        css_href = "../../breviary.css" if is_dated else "../breviary.css"
+        css_href = (
+            f"../../breviary.css?v={BREVIARY_CSS_VERSION}"
+            if is_dated
+            else f"../breviary.css?v={BREVIARY_CSS_VERSION}"
+        )
         original_index_href = (
             f"../../{source_root.name}/index.html" if is_dated else "../index.html"
         )

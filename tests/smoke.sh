@@ -439,11 +439,23 @@ breviary_soup = BeautifulSoup(breviary_first, "lxml")
 if len(breviary_soup.find_all("link", rel="stylesheet")) != 1:
     raise SystemExit("Breviary pages must keep exactly one stylesheet request")
 stylesheet_href = breviary_soup.find("link", rel="stylesheet").get("href")
-if stylesheet_href != "../breviary.css":
+if not re.fullmatch(r"\.\./breviary\.css\?v=\d+", stylesheet_href or ""):
     raise SystemExit(f"Breviary page uses unexpected stylesheet: {stylesheet_href}")
 breviary_css = Path("site/breviary.css").read_text(encoding="utf-8")
 if "✠" not in breviary_css or "url(" in breviary_css or "@import" in breviary_css:
     raise SystemExit("Breviary ornaments must be request-free CSS and Unicode")
+heading_cross_rule = re.search(
+    r"\.breviary-page h2:before,\s*\.breviary-page h3:before\s*\{([^}]+)\}",
+    breviary_css,
+    re.DOTALL,
+)
+if not heading_cross_rule:
+    raise SystemExit("Breviary heading-cross rule missing")
+heading_cross_css = heading_cross_rule.group(1)
+if "right: 100%" not in heading_cross_css or "margin-right:" not in heading_cross_css:
+    raise SystemExit("Heading cross must be right-anchored with an explicit gap")
+if re.search(r"(^|;)\s*left\s*:", heading_cross_css):
+    raise SystemExit("Heading cross must not use glyph-width-dependent left positioning")
 if breviary_soup.find("style"):
     raise SystemExit("Breviary page should not duplicate shared CSS inline")
 PY

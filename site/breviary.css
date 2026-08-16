@@ -561,10 +561,12 @@ code {
     .breviary-page h3:before {
       content: "✠";
       position: absolute;
-      left: -0.76em;
+      right: 100%;
+      margin-right: 0.22em;
       color: #8b0000;
       font-size: 0.68em;
       font-weight: normal;
+      white-space: nowrap;
     }
 
     .breviary-page .pre,
