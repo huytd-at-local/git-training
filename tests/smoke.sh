@@ -4,6 +4,20 @@ set -eu
 PYTHON_BIN="${PYTHON:-python3}"
 
 "$PYTHON_BIN" -m compileall scripts
+test -f .github/workflows/pages.yml
+test -f .github/workflows/retry-pages-deployment.yml
+grep -q '^  build:$' .github/workflows/pages.yml
+grep -q '^  deploy:$' .github/workflows/pages.yml
+grep -q '^    needs: build$' .github/workflows/pages.yml
+grep -q 'actions/upload-pages-artifact@v4' .github/workflows/pages.yml
+grep -q 'actions/deploy-pages@v4' .github/workflows/pages.yml
+grep -q '^  actions: write$' .github/workflows/retry-pages-deployment.yml
+grep -q "github.event.workflow_run.run_attempt < 3" .github/workflows/retry-pages-deployment.yml
+grep -q 'listJobsForWorkflowRunAttempt' .github/workflows/retry-pages-deployment.yml
+grep -q 'reRunFailedJobs' .github/workflows/retry-pages-deployment.yml
+grep -q "buildSucceeded('Generate static site')" .github/workflows/retry-pages-deployment.yml
+grep -q "buildSucceeded('Upload Pages artifact')" .github/workflows/retry-pages-deployment.yml
+grep -q "failed('Deploy to GitHub Pages')" .github/workflows/retry-pages-deployment.yml
 test -f site/index.html
 test -f site/style.css
 test -f site/debug/index.html

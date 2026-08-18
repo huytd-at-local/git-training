@@ -1,0 +1,60 @@
+name: Retry transient Pages deployment failures
+
+on:
+  workflow_run:
+    workflows:
+      - Pages
+    types:
+      - completed
+    branches:
+      - main
+
+# This workflow does not build or deploy content itself. It only asks GitHub to
+# re-run the failed `deploy` job of a Pages run that already built and uploaded
+# a valid artifact. Keeping the retry at this boundary avoids hiding scraper,
+# parser, or test failures.
+permissions:
+  actions: write
+
+jobs:
+  retry-deploy:
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.run_attempt < 3
+    runs-on: ubuntu-latest
+    steps:
+      - name: Re-run only a failed Pages deployment
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            const { data } = await github.rest.actions.listJobsForWorkflowRunAttempt({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: run.id,
+              attempt_number: run.run_attempt,
+              per_page: 100,
+            });
+
+            const build = data.jobs.find((job) => job.name === 'build');
+            const deploy = data.jobs.find((job) => job.name === 'deploy');
+            const buildSucceeded = (name) =>
+              build?.steps.some((step) => step.name === name && step.conclusion === 'success');
+            const failed = (name) =>
+              deploy?.steps.some((step) => step.name === name && step.conclusion === 'failure');
+
+            // A build failure is intentionally left failed for diagnosis. Retry
+            // only the precise boundary that received a transient Pages error.
+            if (!buildSucceeded('Generate static site') ||
+                !buildSucceeded('Upload Pages artifact') ||
+                !failed('Deploy to GitHub Pages')) {
+              core.notice('Pages failure was not an isolated deployment failure; no retry requested.');
+              return;
+            }
+
+            await github.rest.actions.reRunFailedJobs({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: run.id,
+            });
+            core.notice(`Requested deploy retry for Pages run ${run.id}, attempt ${run.run_attempt + 1}.`);
