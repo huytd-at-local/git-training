@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SITE_DIR = ROOT / "site"
 CACHE_DIR = ROOT / ".cache"
 BUILD_DIR = ROOT / "build"
+SJCL_PATH = ROOT / "vendor" / "sjcl.js"
 VN_TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
 USER_AGENT = (
@@ -2738,6 +2739,66 @@ def debug_encrypted_breviary_script() -> str:
   </script>"""
 
 
+def debug_legacy_encrypted_breviary_script() -> str:
+    """Embed SJCL so the legacy Kindle test adds no runtime HTTP request."""
+    sjcl_source = SJCL_PATH.read_text(encoding="utf-8").strip()
+    encrypted_payload = (
+        '{"iv":"6CYwGxW/D8PUepvb","v":1,"iter":2000,"ks":256,"ts":128,'
+        '"mode":"ccm","adata":"","cipher":"aes",'
+        '"salt":"oS2HfbDIGUXWJAqxJh1N+g==",'
+        '"ct":"hOCpCYJJyt0KGilY5bF0FN709Vv/Lf8X881yue+nrGKQqqducXd3G+Mt2g+To1Qt3Vt2ceF0lBFnl9Xq6j7V358ashxK3mn7D+0Jnj5ipI1qbKDOzCTVOG4opvP3x8HKeFN5wqYxkBAo2Cr694t7c/fAHwQ6Q5u8YpfyVCdhZe3nt34Y4CVYl0NdIWHPQPhI9K/8unJv3K4nlF6EiV24PH4U4K0bX1KkmUqhwNvTKE9j4o9Fo5OlDRtdTf+gQnr17jkYVew0mycLhtLQNVyctjbT6mfUVANVj3tUvqL/v8A1AJAlmgQYMdl8IqHSlnYTOx/FHDYGjn8pMc432aJT85zcxjKIYdIsacQHyilvRk83AY+rYawLYdzdsmOzU8Yb9K74u1NlhbWrJYTe1FFbzV44AqZRCGXsJaVmYp0VwvvQdkO+X0OV8pusXgelSvW7KyaM8j6lpyiVoNCgdrmk8cvTe2d4TzYj22sFeE3WFHXLxFf2Yl5bTkhoRXNhWMDaWCbTuirJgVbRWlH9ZstUpukkD16p72Yn2W9kfUif7kd2IG8bk0nPfAZsOcqJwxnDe8A/2vynw1R3Jk9sBODsgaA="}'
+    )
+    return f"""  <script>
+{sjcl_source}
+  </script>
+  <script>
+  (function () {{
+    var CIPHERTEXT = {json.dumps(encrypted_payload)};
+
+    function showStatus(message, isError) {{
+      var status = document.getElementById('passcode-status');
+      status.className = isError ? 'passcode-status passcode-error' : 'passcode-status';
+      status.innerHTML = '';
+      status.appendChild(document.createTextNode(message));
+    }}
+
+    function unlock(passcode) {{
+      var started = new Date().getTime();
+      if (!window.sjcl || !window.sjcl.decrypt) {{
+        showStatus('UNSUPPORTED: Không tải được bộ giải mã JavaScript cũ.', true);
+        return;
+      }}
+      showStatus('Đang kiểm tra và giải mã...', false);
+      window.setTimeout(function () {{
+        try {{
+          var plaintext = window.sjcl.decrypt(passcode, CIPHERTEXT);
+          var elapsed = new Date().getTime() - started;
+          document.getElementById('passcode-gate').style.display = 'none';
+          document.getElementById('encrypted-content').innerHTML = plaintext;
+          document.getElementById('decrypt-result').innerHTML = '';
+          document.getElementById('decrypt-result').appendChild(
+            document.createTextNode('PASS LEGACY - giải mã trong ' + elapsed + ' ms')
+          );
+        }} catch (error) {{
+          showStatus('Passcode không đúng hoặc Kindle không giải mã được AES-CCM.', true);
+          document.getElementById('breviary-passcode').value = '';
+          document.getElementById('breviary-passcode').focus();
+        }}
+      }}, 10);
+    }}
+
+    window.onload = function () {{
+      var form = document.getElementById('passcode-form');
+      form.onsubmit = function () {{
+        unlock(document.getElementById('breviary-passcode').value);
+        return false;
+      }};
+      document.getElementById('breviary-passcode').focus();
+    }};
+  }}());
+  </script>"""
+
+
 def write_debug_site() -> None:
     debug_dir = SITE_DIR / "debug"
     debug_dir.mkdir(parents=True, exist_ok=True)
@@ -2758,6 +2819,7 @@ def write_debug_site() -> None:
         '<p>Mở trang thông số trước, sau đó thử các mẫu. Không cuộn trang trước khi chụp ảnh.</p>'
         '<p><a href="metrics.html">Đo thông số trình duyệt Kindle</a></p>'
         '<p><a href="encrypted-breviary.html">Thử mở Breviary bằng passcode</a></p>'
+        '<p><a href="encrypted-breviary-legacy.html">Thử passcode bản Kindle cũ (AES-CCM)</a></p>'
         '</section>'
     ]
     for heading, group in groups:
@@ -2831,6 +2893,38 @@ def write_debug_site() -> None:
             show_title=False,
             css_href="../breviary.css?v=3-debug-passcode",
             extra_head=debug_encrypted_breviary_script(),
+            bottom_nav=encrypted_nav,
+            body_class="breviary-page debug-passcode-page",
+        ),
+        encoding="utf-8",
+    )
+
+    legacy_body = (
+        '<section id="passcode-gate" class="passcode-gate">'
+        '<div class="passcode-ornament">✠</div>'
+        '<h1>ENGLISH BREVIARY</h1>'
+        '<p class="note">Pure JavaScript AES-CCM test for legacy Kindle</p>'
+        '<form id="passcode-form">'
+        '<label for="breviary-passcode">Passcode</label>'
+        '<input id="breviary-passcode" name="passcode" type="password" inputmode="numeric" '
+        'autocomplete="off" maxlength="32">'
+        '<button type="submit">Unlock</button>'
+        '</form>'
+        '<p id="passcode-status" class="passcode-status">Nhập passcode để mở nội dung mẫu.</p>'
+        '</section>'
+        '<p id="decrypt-result" class="decrypt-result"></p>'
+        '<section id="encrypted-content"></section>'
+    )
+    (debug_dir / "encrypted-breviary-legacy.html").write_text(
+        page_shell(
+            "Legacy Encrypted English Breviary Test",
+            legacy_body,
+            "",
+            "",
+            show_metadata=False,
+            show_title=False,
+            css_href="../breviary.css?v=4-debug-passcode-legacy",
+            extra_head=debug_legacy_encrypted_breviary_script(),
             bottom_nav=encrypted_nav,
             body_class="breviary-page debug-passcode-page",
         ),
