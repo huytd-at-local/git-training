@@ -33,6 +33,15 @@ hoặc thay đổi root:
 python scripts/fetch.py --breviary-only
 ```
 
+Bản tiếng Anh được mã hóa nằm tại `/breviary/en/` và chỉ được sinh khi có biến
+`BREVIARY_EN_PASSCODE` gồm đúng sáu chữ số. GitHub Actions đọc giá trị này từ
+secret cùng tên; passcode không được ghi vào website hoặc repository. Để chỉ
+sinh lại phần tiếng Anh ở local:
+
+```sh
+BREVIARY_EN_PASSCODE=123456 .venv/bin/python scripts/fetch.py --english-only
+```
+
 ## Test
 
 ```sh

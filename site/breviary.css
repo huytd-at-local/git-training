@@ -647,8 +647,75 @@ code {
 
     .breviary-page .pre,
     .breviary-page .label,
+    .breviary-page .rubric,
     .breviary-page .illuminated-initial {
       color: #8b0000;
+    }
+
+    .breviary-page .medieval-rule {
+      margin: 18px 0;
+      color: #8b0000;
+      font-size: 26px;
+      line-height: 1;
+      text-align: center;
+      border-top: 1px solid #777;
+    }
+
+    .breviary-page .medieval-rule:before,
+    .breviary-page .medieval-rule:after {
+      content: "";
+      display: inline-block;
+      width: 30%;
+    }
+
+    .breviary-encrypted .passcode-gate {
+      margin: 20px 0;
+      padding: 22px 0;
+      border-top: 1px solid #777;
+      border-bottom: 1px solid #777;
+    }
+
+    .breviary-encrypted .passcode-ornament {
+      color: #8b0000;
+      text-align: center;
+    }
+
+    .breviary-encrypted label,
+    .breviary-encrypted input,
+    .breviary-encrypted button {
+      display: block;
+      width: 100%;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 40px;
+    }
+
+    .breviary-encrypted label {
+      margin: 10px 0 8px 0;
+      font-weight: bold;
+    }
+
+    .breviary-encrypted input,
+    .breviary-encrypted button {
+      min-height: 82px;
+      margin: 0 0 14px 0;
+      padding: 12px;
+      color: #111;
+      background: #fff;
+      border: 2px solid #777;
+      border-radius: 0;
+    }
+
+    .breviary-encrypted button {
+      font-weight: bold;
+    }
+
+    .breviary-encrypted .passcode-status,
+    .breviary-encrypted .decrypt-status {
+      font-size: 34px;
+    }
+
+    .breviary-encrypted .passcode-error {
+      font-weight: bold;
     }
 
     .breviary-page .liturgical-day:after,

@@ -5,8 +5,10 @@ import argparse
 import html
 import json
 import logging
+import os
 import re
 import shutil
+import subprocess
 import sys
 import unicodedata
 from dataclasses import dataclass
@@ -20,6 +22,10 @@ from zoneinfo import ZoneInfo
 
 
 SOURCE_URL = "https://ktcgkpv.org/readings/prayer"
+IBREVIARY_BASE_URL = "https://www.ibreviary.com/m2"
+IBREVIARY_OPTIONS_URL = f"{IBREVIARY_BASE_URL}/opzioni.php"
+IBREVIARY_URL = f"{IBREVIARY_BASE_URL}/breviario.php"
+IBREVIARY_PASSCODE_ENV = "BREVIARY_EN_PASSCODE"
 TIMEOUT_SECONDS = 30
 ROOT = Path(__file__).resolve().parents[1]
 SITE_DIR = ROOT / "site"
@@ -70,6 +76,16 @@ PRAYERS = [
     ("Kinh Tối", "kinh-toi"),
 ]
 
+ENGLISH_PRAYERS = [
+    ("Office of Readings", "office-of-readings", "ufficio_delle_letture"),
+    ("Morning Prayer", "morning-prayer", "lodi"),
+    ("Daytime Prayers", "daytime-prayers", "ora_media"),
+    ("Evening Prayer", "evening-prayer", "vespri"),
+    ("Night Prayer", "night-prayer", "compieta"),
+]
+ENGLISH_SESSION_KEY = "breviary-en-key-v1"
+ENCRYPT_HELPER = ROOT / "scripts" / "encrypt_breviary.js"
+
 BREVIARY_CSS = """
 /* Monastic Breviary: ornament only; production pagination metrics stay unchanged. */
     .breviary-page {
@@ -117,8 +133,75 @@ BREVIARY_CSS = """
 
     .breviary-page .pre,
     .breviary-page .label,
+    .breviary-page .rubric,
     .breviary-page .illuminated-initial {
       color: #8b0000;
+    }
+
+    .breviary-page .medieval-rule {
+      margin: 18px 0;
+      color: #8b0000;
+      font-size: 26px;
+      line-height: 1;
+      text-align: center;
+      border-top: 1px solid #777;
+    }
+
+    .breviary-page .medieval-rule:before,
+    .breviary-page .medieval-rule:after {
+      content: "";
+      display: inline-block;
+      width: 30%;
+    }
+
+    .breviary-encrypted .passcode-gate {
+      margin: 20px 0;
+      padding: 22px 0;
+      border-top: 1px solid #777;
+      border-bottom: 1px solid #777;
+    }
+
+    .breviary-encrypted .passcode-ornament {
+      color: #8b0000;
+      text-align: center;
+    }
+
+    .breviary-encrypted label,
+    .breviary-encrypted input,
+    .breviary-encrypted button {
+      display: block;
+      width: 100%;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 40px;
+    }
+
+    .breviary-encrypted label {
+      margin: 10px 0 8px 0;
+      font-weight: bold;
+    }
+
+    .breviary-encrypted input,
+    .breviary-encrypted button {
+      min-height: 82px;
+      margin: 0 0 14px 0;
+      padding: 12px;
+      color: #111;
+      background: #fff;
+      border: 2px solid #777;
+      border-radius: 0;
+    }
+
+    .breviary-encrypted button {
+      font-weight: bold;
+    }
+
+    .breviary-encrypted .passcode-status,
+    .breviary-encrypted .decrypt-status {
+      font-size: 34px;
+    }
+
+    .breviary-encrypted .passcode-error {
+      font-weight: bold;
     }
 
     .breviary-page .liturgical-day:after,
@@ -286,6 +369,13 @@ class DaySite:
 
 
 @dataclass(frozen=True)
+class EnglishDaySite:
+    date: datetime
+    prayers: list[Prayer]
+    liturgical_day: LiturgicalDay
+
+
+@dataclass(frozen=True)
 class DebugPattern:
     code: str
     title: str
@@ -355,6 +445,194 @@ def fetch_prayer_json(
     if not payload.get("success"):
         raise ValueError(f"AJAX prayer request failed: {payload.get('msg')}")
     return payload["data"]
+
+
+def ibreviary_request(
+    session: requests.Session,
+    url: str,
+    *,
+    data: dict[str, str | int] | None = None,
+) -> str:
+    method = "POST" if data is not None else "GET"
+    logging.info("Fetching iBreviary %s %s", method, url)
+    response = session.request(
+        method,
+        url,
+        data=data,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml",
+            "Referer": IBREVIARY_URL,
+        },
+        timeout=TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    response.encoding = response.apparent_encoding or "utf-8"
+    return response.text
+
+
+def configure_ibreviary_date(session: requests.Session, date: datetime) -> None:
+    source = ibreviary_request(
+        session,
+        IBREVIARY_OPTIONS_URL,
+        data={
+            "lang": "en",
+            "giorno": date.day,
+            "mese": date.month,
+            "anno": date.year,
+            "ok": "ok",
+        },
+    )
+    soup = BeautifulSoup(source, "lxml")
+    selected_language = soup.select_one('input[name="lang"][value="en"][checked]')
+    selected_day = soup.select_one('input[name="giorno"]')
+    selected_month = soup.select_one('select[name="mese"] option[selected]')
+    selected_year = soup.select_one('input[name="anno"]')
+    if not selected_language:
+        raise ValueError("iBreviary did not retain the English language setting")
+    actual = (
+        int(selected_day.get("value", "0")) if selected_day else 0,
+        int(selected_month.get("value", "0")) if selected_month else 0,
+        int(selected_year.get("value", "0")) if selected_year else 0,
+    )
+    expected = (date.day, date.month, date.year)
+    if actual != expected:
+        raise ValueError(f"iBreviary retained date {actual}, expected {expected}")
+
+
+def ibreviary_inline_tokens(node, inherited_class: str = "") -> list[str | None]:
+    if isinstance(node, Comment):
+        return []
+    if isinstance(node, NavigableString):
+        value = str(node).replace("\xa0", " ")
+        if not value:
+            return []
+        escaped = html.escape(value, quote=False)
+        if inherited_class:
+            return [f'<span class="{inherited_class}">{escaped}</span>']
+        return [escaped]
+    if not isinstance(node, Tag):
+        return []
+    if node.name == "br":
+        return [None]
+    if node.name == "a":
+        return []
+
+    classes = set(node.get("class", []))
+    child_class = inherited_class
+    if "capolettera_piccolo" in classes:
+        child_class = "source-heading"
+    elif "rubrica" in classes:
+        child_class = "rubric"
+    elif "citazione" in classes:
+        child_class = "note"
+
+    tokens: list[str | None] = []
+    for child in node.children:
+        tokens.extend(ibreviary_inline_tokens(child, child_class))
+
+    if node.name in {"em", "i", "strong", "b"} and not child_class:
+        tag_name = "strong" if node.name in {"strong", "b"} else "em"
+        wrapped: list[str | None] = []
+        for token in tokens:
+            wrapped.append(None if token is None else f"<{tag_name}>{token}</{tag_name}>")
+        return wrapped
+    return tokens
+
+
+def render_ibreviary_group(lines: list[str]) -> str:
+    joined = " ".join(lines)
+    soup = BeautifulSoup(f"<div>{joined}</div>", "lxml")
+    wrapper = soup.find("div")
+    plain = wrapper.get_text(" ", strip=True) if wrapper else ""
+    if not plain:
+        return ""
+    if wrapper and wrapper.select_one(".source-heading"):
+        return f"<h2>{html.escape(plain)}</h2>"
+    if len(lines) == 1 and lines[0].lstrip().startswith('<span class="rubric">'):
+        return f'<p class="label">{lines[0]}</p>'
+    if len(lines) == 1:
+        return f"<p>{lines[0]}</p>"
+    return '<div class="stanza">' + "".join(f"<div>{line}</div>" for line in lines) + "</div>"
+
+
+def render_ibreviary_paragraph(node: Tag) -> list[str]:
+    tokens = ibreviary_inline_tokens(node)
+    raw_lines: list[str] = []
+    current = ""
+    for token in tokens:
+        if token is None:
+            raw_lines.append(current.strip())
+            current = ""
+        else:
+            current += token
+    raw_lines.append(current.strip())
+
+    rendered: list[str] = []
+    group: list[str] = []
+    for line in raw_lines:
+        if line:
+            group.append(line)
+            continue
+        if group:
+            block = render_ibreviary_group(group)
+            if block:
+                rendered.append(block)
+            group = []
+    if group:
+        block = render_ibreviary_group(group)
+        if block:
+            rendered.append(block)
+    return rendered
+
+
+def parse_ibreviary_prayer(source: str, title: str, slug: str) -> Prayer:
+    soup = BeautifulSoup(source, "lxml")
+    inner = soup.select_one("#contenuto .inner")
+    if not inner:
+        raise ValueError(f"iBreviary content container missing for {title}")
+
+    blocks: list[str] = []
+    started = False
+    for node in list(inner.children):
+        if not isinstance(node, Tag):
+            continue
+        if not started:
+            section = node.select_one(".sezione")
+            if section and normalize_key(section.get_text(" ", strip=True)) == normalize_key(title):
+                started = True
+            continue
+        if node.name == "p" and node.get_text(" ", strip=True).strip() == "******":
+            break
+        if node.name == "hr":
+            blocks.append('<div class="medieval-rule" aria-hidden="true">✠</div>')
+        elif node.name == "p":
+            blocks.extend(render_ibreviary_paragraph(node))
+
+    body_html = "\n".join(block for block in blocks if block.strip())
+    if not started or len(BeautifulSoup(body_html, "lxml").get_text(" ", strip=True)) < 100:
+        raise ValueError(f"iBreviary prayer content missing or too short for {title}")
+    return Prayer(title, slug, body_html)
+
+
+def fetch_english_day(session: requests.Session, date: datetime) -> EnglishDaySite:
+    configure_ibreviary_date(session, date)
+    index_source = ibreviary_request(session, IBREVIARY_URL)
+    index_soup = BeautifulSoup(index_source, "lxml")
+    inner = index_soup.select_one("#contenuto .inner")
+    paragraphs = inner.find_all("p", recursive=False) if inner else []
+    if len(paragraphs) < 3:
+        raise ValueError("iBreviary index metadata is incomplete")
+    date_title = paragraphs[0].get_text(" ", strip=True)
+    day_title = paragraphs[1].get_text(" ", strip=True)
+    rank = paragraphs[2].get_text(" ", strip=True)
+    liturgical_day = LiturgicalDay(day_title, rank, "iBreviary", date_title)
+
+    prayers: list[Prayer] = []
+    for title, slug, source_key in ENGLISH_PRAYERS:
+        source = ibreviary_request(session, f"{IBREVIARY_URL}?s={source_key}")
+        prayers.append(parse_ibreviary_prayer(source, title, slug))
+    return EnglishDaySite(date, prayers, liturgical_day)
 
 
 def save_debug_source(source: str) -> None:
@@ -2435,6 +2713,394 @@ def write_breviary_day_site(
             )
 
 
+def english_breviary_nav_html(
+    previous_href: str | None,
+    next_href: str | None,
+    index_href: str = "index.html",
+) -> str:
+    previous_item = (
+        f'<a class="nav-icon" href="{previous_href}">&#8249;</a>'
+        if previous_href
+        else '<span class="nav-icon">&#8249;</span>'
+    )
+    next_item = (
+        f'<a class="nav-icon" href="{next_href}">&#8250;</a>'
+        if next_href
+        else '<span class="nav-icon">&#8250;</span>'
+    )
+    return (
+        '<nav class="page-nav paged-nav breviary-nav">'
+        f"{previous_item}{next_item}"
+        f'<a class="nav-index" href="{index_href}">Index</a>'
+        f"{previous_item}{next_item}"
+        "</nav>"
+    )
+
+
+def english_date_nav_html(
+    current_date: datetime,
+    available_dates: list[datetime],
+    from_dir: str,
+) -> str:
+    items: list[str] = []
+    for date in available_dates:
+        href = f"{date_dir_name(date)}/index.html"
+        if from_dir:
+            href = f"../{href}"
+        cls = ' class="active"' if date.date() == current_date.date() else ""
+        items.append(f'<a{cls} href="{href}">{date.day}/{date.month}</a>')
+    return '<nav class="date-nav">' + "".join(items) + "</nav>"
+
+
+def english_index_inner(
+    site: EnglishDaySite,
+    available_dates: list[datetime],
+    updated: str,
+    from_dir: str,
+) -> str:
+    items = "".join(
+        f'<li><a href="{slug}.html">{html.escape(title)}</a></li>'
+        for title, slug, _ in ENGLISH_PRAYERS
+    )
+    return clean_output_html(f"""
+<h1>English Breviary</h1>
+<p class="updated">Updated: {html.escape(updated)}</p>
+{liturgical_day_html(site.liturgical_day)}
+{english_date_nav_html(site.date, available_dates, from_dir)}
+<section class="home-list"><ul>{items}</ul></section>
+<p class="kindle-note">For personal reading on Kindle · Source: iBreviary.</p>
+""")
+
+
+def english_prayer_inner(
+    prayer: Prayer,
+    liturgical_day: LiturgicalDay,
+    page_body: str,
+    page_index: int,
+    page_count: int,
+    nav: str,
+    updated: str,
+) -> str:
+    title = f"<h1>{html.escape(prayer.title)}</h1>" if page_index == 1 else ""
+    metadata = (
+        f'<p class="updated">Updated: {html.escape(updated)}</p>'
+        f"{liturgical_day_html(liturgical_day)}"
+        if page_index == 1
+        else f'<p class="updated">{html.escape(prayer.title)} {page_index}/{page_count}</p>'
+    )
+    return clean_output_html(f"""
+{nav}
+{title}
+{metadata}
+{page_body}
+{nav}
+""")
+
+
+def english_unlock_script(ciphertext: dict) -> str:
+    payload = json.dumps(ciphertext, separators=(",", ":"))
+    return f"""  <script>
+  (function () {{
+    var CIPHERTEXT = {payload};
+    var SESSION_KEY = {json.dumps(ENGLISH_SESSION_KEY)};
+
+    function status(message, isError) {{
+      var node = document.getElementById('passcode-status');
+      node.className = isError ? 'passcode-status passcode-error' : 'passcode-status';
+      node.innerHTML = '';
+      node.appendChild(document.createTextNode(message));
+    }}
+
+    function reveal(plaintext) {{
+      document.getElementById('passcode-gate').style.display = 'none';
+      document.getElementById('encrypted-content').innerHTML = plaintext;
+    }}
+
+    function unlock(passcode) {{
+      status('Unlocking...', false);
+      window.setTimeout(function () {{
+        var details = {{}};
+        try {{
+          var plaintext = window.sjcl.json.decrypt(passcode, CIPHERTEXT, {{}}, details);
+          window.sessionStorage.setItem(
+            SESSION_KEY,
+            window.sjcl.codec.base64.fromBits(details.key)
+          );
+          reveal(plaintext);
+        }} catch (error) {{
+          status('Incorrect passcode.', true);
+          document.getElementById('breviary-passcode').value = '';
+          document.getElementById('breviary-passcode').focus();
+        }}
+      }}, 10);
+    }}
+
+    window.onload = function () {{
+      var encodedKey;
+      try {{ encodedKey = window.sessionStorage.getItem(SESSION_KEY); }} catch (ignore) {{}}
+      if (encodedKey) {{
+        try {{
+          reveal(window.sjcl.json.decrypt(window.sjcl.codec.base64.toBits(encodedKey), CIPHERTEXT));
+          return;
+        }} catch (ignore) {{
+          try {{ window.sessionStorage.removeItem(SESSION_KEY); }} catch (ignoreAgain) {{}}
+        }}
+      }}
+      document.getElementById('passcode-form').onsubmit = function () {{
+        unlock(document.getElementById('breviary-passcode').value);
+        return false;
+      }};
+      document.getElementById('breviary-passcode').focus();
+    }};
+  }}());
+  </script>"""
+
+
+def english_session_script(ciphertext: dict, unlock_href: str) -> str:
+    payload = json.dumps(ciphertext, separators=(",", ":"))
+    return f"""  <script>
+  (function () {{
+    var CIPHERTEXT = {payload};
+    var SESSION_KEY = {json.dumps(ENGLISH_SESSION_KEY)};
+    var UNLOCK_HREF = {json.dumps(unlock_href)};
+
+    function locked(message) {{
+      var node = document.getElementById('decrypt-status');
+      node.className = 'decrypt-status passcode-error';
+      node.innerHTML = '';
+      node.appendChild(document.createTextNode(message + ' '));
+      var link = document.createElement('a');
+      link.href = UNLOCK_HREF;
+      link.appendChild(document.createTextNode('Open English Breviary'));
+      node.appendChild(link);
+    }}
+
+    window.onload = function () {{
+      var encodedKey;
+      try {{ encodedKey = window.sessionStorage.getItem(SESSION_KEY); }} catch (ignore) {{}}
+      if (!encodedKey) {{
+        locked('Locked.');
+        return;
+      }}
+      try {{
+        var key = window.sjcl.codec.base64.toBits(encodedKey);
+        document.getElementById('decrypt-status').style.display = 'none';
+        document.getElementById('encrypted-content').innerHTML =
+          window.sjcl.json.decrypt(key, CIPHERTEXT);
+      }} catch (error) {{
+        locked('The session key is no longer valid.');
+      }}
+    }};
+  }}());
+  </script>"""
+
+
+def english_encrypted_shell(
+    ciphertext: dict,
+    css_href: str,
+    *,
+    unlock_page: bool,
+    unlock_href: str,
+    first_page: bool = False,
+) -> str:
+    sjcl_source = SJCL_PATH.read_text(encoding="utf-8").strip()
+    if unlock_page:
+        gate = (
+            '<section id="passcode-gate" class="passcode-gate">'
+            '<div class="passcode-ornament">✠</div>'
+            '<h1>English Breviary</h1>'
+            '<form id="passcode-form">'
+            '<label for="breviary-passcode">Passcode</label>'
+            '<input id="breviary-passcode" name="passcode" type="password" '
+            'inputmode="numeric" pattern="[0-9]*" autocomplete="off">'
+            '<button type="submit">Unlock</button>'
+            '</form><p id="passcode-status" class="passcode-status">Enter the passcode to read.</p>'
+            '</section>'
+        )
+        behavior = english_unlock_script(ciphertext)
+    else:
+        gate = '<p id="decrypt-status" class="decrypt-status">Opening...</p>'
+        behavior = english_session_script(ciphertext, unlock_href)
+    body_class = "breviary-page breviary-encrypted"
+    if first_page:
+        body_class += " breviary-first"
+    return clean_output_html(f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>English Breviary</title>
+  <link rel="stylesheet" href="{html.escape(css_href, quote=True)}">
+  <script>{sjcl_source}</script>
+{behavior}
+</head>
+<body class="{body_class}">
+  <main>
+    {gate}
+    <div id="encrypted-content"></div>
+  </main>
+</body>
+</html>
+""")
+
+
+def encrypt_english_pages(pages: list[dict[str, str]], passcode: str) -> dict[str, dict]:
+    environment = os.environ.copy()
+    environment[IBREVIARY_PASSCODE_ENV] = passcode
+    result = subprocess.run(
+        ["node", str(ENCRYPT_HELPER)],
+        input=json.dumps({"pages": pages}),
+        text=True,
+        capture_output=True,
+        check=True,
+        env=environment,
+        cwd=ROOT,
+    )
+    encoded = json.loads(result.stdout)
+    return {page_id: json.loads(payload) for page_id, payload in encoded.items()}
+
+
+def write_english_breviary(day_sites: list[EnglishDaySite], passcode: str) -> None:
+    target_root = SITE_DIR / "breviary" / "en"
+    updated = datetime.now(VN_TZ).strftime("%d/%m/%Y %H:%M Vietnam time")
+    available_dates = [site.date for site in day_sites]
+    today = day_sites[len(day_sites) // 2]
+    paginated = {
+        date_dir_name(site.date): {
+            prayer.slug: paginate_html(prayer.body_html) for prayer in site.prayers
+        }
+        for site in day_sites
+    }
+
+    documents: list[dict[str, str]] = []
+    outputs: list[dict[str, object]] = []
+
+    def add_document(
+        page_id: str,
+        path: Path,
+        css_href: str,
+        plaintext: str,
+        *,
+        unlock_page: bool = False,
+        unlock_href: str = "index.html",
+        first_page: bool = False,
+    ) -> None:
+        documents.append({"id": page_id, "html": plaintext})
+        outputs.append(
+            {
+                "id": page_id,
+                "path": path,
+                "css_href": css_href,
+                "unlock_page": unlock_page,
+                "unlock_href": unlock_href,
+                "first_page": first_page,
+            }
+        )
+
+    add_document(
+        "root-index",
+        target_root / "index.html",
+        "../../breviary.css?v=3-encrypted-en",
+        english_index_inner(today, available_dates, updated, ""),
+        unlock_page=True,
+    )
+
+    def add_site_documents(site: EnglishDaySite, target_dir: Path, prefix: str, dated: bool) -> None:
+        date_name = date_dir_name(site.date)
+        css_href = "../../../breviary.css?v=3-encrypted-en" if dated else "../../breviary.css?v=3-encrypted-en"
+        unlock_href = "../index.html" if dated else "index.html"
+        if dated:
+            add_document(
+                f"{date_name}-index",
+                target_dir / "index.html",
+                css_href,
+                english_index_inner(site, available_dates, updated, date_name),
+                unlock_href=unlock_href,
+            )
+
+        prayer_by_slug = {prayer.slug: prayer for prayer in site.prayers}
+        ordered = [prayer_by_slug[slug] for _, slug, _ in ENGLISH_PRAYERS]
+        for prayer_index, prayer in enumerate(ordered):
+            pages = paginated[date_name][prayer.slug]
+            for page_index, page_body in enumerate(pages, start=1):
+                previous_href = None
+                next_href = None
+                if page_index > 1:
+                    previous_href = prayer_page_filename(prayer.slug, page_index - 1)
+                elif prayer_index > 0:
+                    previous = ordered[prayer_index - 1]
+                    previous_href = prayer_page_filename(
+                        previous.slug, len(paginated[date_name][previous.slug])
+                    )
+                if page_index < len(pages):
+                    next_href = prayer_page_filename(prayer.slug, page_index + 1)
+                elif prayer_index + 1 < len(ordered):
+                    next_href = prayer_page_filename(ordered[prayer_index + 1].slug, 1)
+                nav = english_breviary_nav_html(previous_href, next_href)
+                plaintext = english_prayer_inner(
+                    prayer,
+                    site.liturgical_day,
+                    page_body,
+                    page_index,
+                    len(pages),
+                    nav,
+                    updated,
+                )
+                page_id = f"{prefix}{prayer.slug}-{page_index}"
+                add_document(
+                    page_id,
+                    target_dir / prayer_page_filename(prayer.slug, page_index),
+                    css_href,
+                    plaintext,
+                    unlock_href=unlock_href,
+                    first_page=page_index == 1,
+                )
+
+    for site in day_sites:
+        add_site_documents(
+            site,
+            target_root / date_dir_name(site.date),
+            f"{date_dir_name(site.date)}-",
+            True,
+        )
+    add_site_documents(today, target_root, "root-", False)
+
+    ciphertexts = encrypt_english_pages(documents, passcode)
+    temporary = target_root.with_name("en.new")
+    if temporary.exists():
+        shutil.rmtree(temporary)
+    temporary.mkdir(parents=True)
+    for output in outputs:
+        relative = Path(output["path"]).relative_to(target_root)
+        destination = temporary / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(
+            english_encrypted_shell(
+                ciphertexts[str(output["id"])],
+                str(output["css_href"]),
+                unlock_page=bool(output["unlock_page"]),
+                unlock_href=str(output["unlock_href"]),
+                first_page=bool(output["first_page"]),
+            ),
+            encoding="utf-8",
+        )
+    if target_root.exists():
+        shutil.rmtree(target_root)
+    temporary.rename(target_root)
+    logging.info("Generated %d encrypted English Breviary pages", len(outputs))
+
+
+def build_english_breviary(run_date: datetime, passcode: str) -> None:
+    if not re.fullmatch(r"\d{6}", passcode):
+        raise ValueError(f"{IBREVIARY_PASSCODE_ENV} must contain exactly six digits")
+    session = requests.Session()
+    sites = [
+        fetch_english_day(session, date)
+        for date in (run_date - timedelta(days=1), run_date, run_date + timedelta(days=1))
+    ]
+    write_english_breviary(sites, passcode)
+
+
 DEBUG_PROSE = (
     "Các ngài đã giải thích rõ hơn về sự kiện đó, dựa vào những lý lẽ sâu sắc "
     "để trình bày ý nghĩa và bản chất của sự kiện, nhất là cho mọi người nhận ra "
@@ -3268,6 +3934,7 @@ def main() -> int:
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--debug-only", action="store_true")
     parser.add_argument("--breviary-only", action="store_true")
+    parser.add_argument("--english-only", action="store_true")
     args = parser.parse_args()
     setup_logging(args.verbose)
 
@@ -3280,6 +3947,14 @@ def main() -> int:
             return 0
         if args.breviary_only:
             write_breviary_snapshot()
+            return 0
+        if args.english_only:
+            passcode = os.environ.get(IBREVIARY_PASSCODE_ENV, "")
+            if not passcode:
+                raise ValueError(f"{IBREVIARY_PASSCODE_ENV} is required for --english-only")
+            SITE_DIR.mkdir(parents=True, exist_ok=True)
+            write_breviary_stylesheet()
+            build_english_breviary(datetime.now(VN_TZ), passcode)
             return 0
         session = requests.Session()
         run_date = datetime.now(VN_TZ)
@@ -3314,6 +3989,19 @@ def main() -> int:
                 raise ValueError("Parsed prayers do not match expected fixed list")
             day_sites = [DaySite(run_date, prayers, liturgical_day, debug_lines)]
         write_site(day_sites)
+        passcode = os.environ.get(IBREVIARY_PASSCODE_ENV, "")
+        if passcode:
+            try:
+                build_english_breviary(run_date, passcode)
+            except Exception:
+                logging.exception(
+                    "English Breviary update failed; preserving the last committed encrypted copy"
+                )
+        else:
+            logging.warning(
+                "%s is not configured; preserving the last committed English Breviary",
+                IBREVIARY_PASSCODE_ENV,
+            )
         append_debug([line for site in day_sites for line in site.debug_lines])
         logging.info("Generated %d day(s) of prayer pages in %s", len(day_sites), SITE_DIR.relative_to(ROOT))
         return 0

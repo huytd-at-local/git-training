@@ -25,6 +25,9 @@ test -f site/debug/metrics.html
 test -f site/debug/encrypted-breviary.html
 test -f site/debug/encrypted-breviary-legacy.html
 test -f site/debug/encrypted-breviary-session-2.html
+test -f scripts/encrypt_breviary.js
+grep -q 'BREVIARY_EN_PASSCODE' .github/workflows/pages.yml
+! grep -R -q '211216' scripts site .github tests vendor
 test -f vendor/sjcl.js
 test -f vendor/SJCL-LICENSE.txt
 test -f site/breviary/index.html
@@ -45,7 +48,7 @@ grep -q "Passcode không đúng" site/debug/encrypted-breviary.html
 grep -q "UNSUPPORTED:" site/debug/encrypted-breviary.html
 ! grep -Eq 'value="[0-9]{6}"' site/debug/encrypted-breviary.html
 ! grep -q 'Evening Prayer' site/debug/encrypted-breviary.html
-grep -q 'mode":"ccm' site/debug/encrypted-breviary-legacy.html
+grep -q 'mode.*ccm' site/debug/encrypted-breviary-legacy.html
 grep -q 'PASS LEGACY' site/debug/encrypted-breviary-legacy.html
 grep -q 'window.sjcl.decrypt' site/debug/encrypted-breviary-legacy.html
 grep -q 'PASS LEGACY + SESSION' site/debug/encrypted-breviary-legacy.html
@@ -59,6 +62,17 @@ grep -q 'PASS SESSION' site/debug/encrypted-breviary-session-2.html
 grep -q 'sessionStorage.getItem' site/debug/encrypted-breviary-session-2.html
 grep -q 'LOCKED: Chưa có khóa phiên' site/debug/encrypted-breviary-session-2.html
 ! grep -q 'Night Prayer' site/debug/encrypted-breviary-session-2.html
+
+if test -d site/breviary/en; then
+  test -f site/breviary/en/index.html
+  grep -q 'breviary-en-key-v1' site/breviary/en/index.html
+  grep -q 'mode.*ccm' site/breviary/en/index.html
+  ! grep -R -q '<script[^>]* src=' site/breviary/en
+  ! grep -R -q 'Office of Readings' site/breviary/en
+  ! grep -R -q 'Morning Prayer' site/breviary/en
+  ! grep -R -q 'Evening Prayer' site/breviary/en
+  ! grep -R -q 'Night Prayer' site/breviary/en
+fi
 grep -q 'display: block;' site/style.css
 for file in site/debug/[pPvVrRaAmMbB][0-9][0-9].html; do
   grep -q 'DEBUG [PVRAMB][0-9][0-9]' "$file"

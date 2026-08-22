@@ -32,6 +32,8 @@ jobs:
 
       - name: Generate static site
         run: python scripts/fetch.py
+        env:
+          BREVIARY_EN_PASSCODE: ${{ secrets.BREVIARY_EN_PASSCODE }}
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
