@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Legacy Encrypted English Breviary Test</title>
-  <link rel="stylesheet" href="../breviary.css?v=4-debug-passcode-legacy">
+  <title>Encrypted Breviary Session Page Two</title>
+  <link rel="stylesheet" href="../breviary.css?v=5-debug-session">
   <script>
 "use strict";var sjcl={cipher:{},hash:{},keyexchange:{},mode:{},misc:{},codec:{},exception:{corrupt:function(a){this.toString=function(){return"CORRUPT: "+this.message};this.message=a},invalid:function(a){this.toString=function(){return"INVALID: "+this.message};this.message=a},bug:function(a){this.toString=function(){return"BUG: "+this.message};this.message=a},notReady:function(a){this.toString=function(){return"NOT READY: "+this.message};this.message=a}}};
 sjcl.cipher.aes=function(a){this.s[0][0][0]||this.O();var b,c,d,e,f=this.s[0][4],g=this.s[1];b=a.length;var h=1;if(4!==b&&6!==b&&8!==b)throw new sjcl.exception.invalid("invalid aes key size");this.b=[d=a.slice(0),e=[]];for(a=b;a<4*b+28;a++){c=d[a-1];if(0===a%b||8===b&&4===a%b)c=f[c>>>24]<<24^f[c>>16&255]<<16^f[c>>8&255]<<8^f[c&255],0===a%b&&(c=c<<8^c>>>24^h<<24,h=h<<1^283*(h>>7));d[a]=d[a-b]^c}for(b=0;a;b++,a--)c=d[b&3?a:a-4],e[b]=4>=a||4>b?c:g[0][f[c>>>24]]^g[1][f[c>>16&255]]^g[2][f[c>>8&255]]^g[3][f[c&
@@ -69,65 +69,43 @@ b){var c={},d;for(d=0;d<b.length;d++)void 0!==a[b[d]]&&(c[b[d]]=a[b[d]]);return 
   </script>
   <script>
   (function () {
-    var CIPHERTEXT = "{\"iv\":\"6CYwGxW/D8PUepvb\",\"v\":1,\"iter\":2000,\"ks\":256,\"ts\":128,\"mode\":\"ccm\",\"adata\":\"\",\"cipher\":\"aes\",\"salt\":\"oS2HfbDIGUXWJAqxJh1N+g==\",\"ct\":\"hOCpCYJJyt0KGilY5bF0FN709Vv/Lf8X881yue+nrGKQqqducXd3G+Mt2g+To1Qt3Vt2ceF0lBFnl9Xq6j7V358ashxK3mn7D+0Jnj5ipI1qbKDOzCTVOG4opvP3x8HKeFN5wqYxkBAo2Cr694t7c/fAHwQ6Q5u8YpfyVCdhZe3nt34Y4CVYl0NdIWHPQPhI9K/8unJv3K4nlF6EiV24PH4U4K0bX1KkmUqhwNvTKE9j4o9Fo5OlDRtdTf+gQnr17jkYVew0mycLhtLQNVyctjbT6mfUVANVj3tUvqL/v8A1AJAlmgQYMdl8IqHSlnYTOx/FHDYGjn8pMc432aJT85zcxjKIYdIsacQHyilvRk83AY+rYawLYdzdsmOzU8Yb9K74u1NlhbWrJYTe1FFbzV44AqZRCGXsJaVmYp0VwvvQdkO+X0OV8pusXgelSvW7KyaM8j6lpyiVoNCgdrmk8cvTe2d4TzYj22sFeE3WFHXLxFf2Yl5bTkhoRXNhWMDaWCbTuirJgVbRWlH9ZstUpukkD16p72Yn2W9kfUif7kd2IG8bk0nPfAZsOcqJwxnDe8A/2vynw1R3Jk9sBODsgaA=\"}";
+    var CIPHERTEXT = "{\"iv\":\"N6jkPUwZzIPdZbdK\",\"v\":1,\"iter\":2000,\"ks\":256,\"ts\":128,\"mode\":\"ccm\",\"adata\":\"\",\"cipher\":\"aes\",\"salt\":\"oS2HfbDIGUXWJAqxJh1N+g==\",\"ct\":\"9OXBzWa3jCVnRsm4qnMEiiF0e/j1CGPTg/blP6tR75uuPy98MYD645QVA5vPWrTO7bQId0NDD0en870wTA6dW7wf2tK4VrsxcYds2kljyfXHRGfDQvKHHMXfGZIusQegPQxN8lzZRs2/87DOKUMj49dx7mKwFciE/38fVr38A1ZgYyo5NWOMBtmGk3XnYtBdH8k9WoW6NIH+lSbRnH8rUYaF3KIlsZaGJAgn9ntWlNAQZvGK2G82Y32ubugvZDjItPo7+1W1xtpJB6EGQffmt4Z9TdzV8rlMLHQn51facv/QeJFPW005i5XDsUSD349MKsV4QIBfXDydF7LVUUVizBWQo7LQ1uuYAU71cC3FpyQntgwr0nW62p+jOvkY9GyOi+WnOuVVnrMD+iQ6vqRLz8FfM2PEGSb+3b9xHMaDj5GplDOMtQ==\"}";
     var SESSION_KEY = 'breviary-debug-key-v1';
 
-    function showStatus(message, isError) {
-      var status = document.getElementById('passcode-status');
-      status.className = isError ? 'passcode-status passcode-error' : 'passcode-status';
+    function showFailure(message) {
+      var status = document.getElementById('session-status');
+      status.className = 'passcode-status passcode-error';
       status.innerHTML = '';
       status.appendChild(document.createTextNode(message));
-    }
-
-    function unlock(passcode) {
-      var started = new Date().getTime();
-      if (!window.sjcl || !window.sjcl.decrypt) {
-        showStatus('UNSUPPORTED: Không tải được bộ giải mã JavaScript cũ.', true);
-        return;
-      }
-      showStatus('Đang kiểm tra và giải mã...', false);
-      window.setTimeout(function () {
-        var details = {};
-        var plaintext;
-        try {
-          plaintext = window.sjcl.json.decrypt(passcode, CIPHERTEXT, {}, details);
-        } catch (error) {
-          showStatus('Passcode không đúng hoặc Kindle không giải mã được AES-CCM.', true);
-          document.getElementById('breviary-passcode').value = '';
-          document.getElementById('breviary-passcode').focus();
-          return;
-        }
-        try {
-          if (!window.sessionStorage) { throw new Error('sessionStorage unavailable'); }
-          window.sessionStorage.setItem(
-            SESSION_KEY,
-            window.sjcl.codec.base64.fromBits(details.key)
-          );
-          if (!window.sessionStorage.getItem(SESSION_KEY)) {
-            throw new Error('session key was not retained');
-          }
-        } catch (storageError) {
-          showStatus('PASS AES-CCM, nhưng Kindle không lưu được khóa phiên.', true);
-          return;
-        }
-        var elapsed = new Date().getTime() - started;
-        document.getElementById('passcode-gate').style.display = 'none';
-        document.getElementById('encrypted-content').innerHTML = plaintext;
-        document.getElementById('continue-link').style.display = 'block';
-        document.getElementById('decrypt-result').innerHTML = '';
-        document.getElementById('decrypt-result').appendChild(
-          document.createTextNode('PASS LEGACY + SESSION - giải mã trong ' + elapsed + ' ms')
-        );
-      }, 10);
+      document.getElementById('return-to-unlock').style.display = 'block';
     }
 
     window.onload = function () {
-      var form = document.getElementById('passcode-form');
-      form.onsubmit = function () {
-        unlock(document.getElementById('breviary-passcode').value);
-        return false;
-      };
-      document.getElementById('breviary-passcode').focus();
+      var started = new Date().getTime();
+      var encodedKey;
+      try {
+        if (!window.sessionStorage) { throw new Error('sessionStorage unavailable'); }
+        encodedKey = window.sessionStorage.getItem(SESSION_KEY);
+      } catch (storageError) {
+        showFailure('UNSUPPORTED: Kindle không đọc được khóa phiên.');
+        return;
+      }
+      if (!encodedKey) {
+        showFailure('LOCKED: Chưa có khóa phiên; hãy mở khóa ở trang đầu.');
+        return;
+      }
+      try {
+        var key = window.sjcl.codec.base64.toBits(encodedKey);
+        var plaintext = window.sjcl.json.decrypt(key, CIPHERTEXT);
+        var elapsed = new Date().getTime() - started;
+        document.getElementById('session-status').innerHTML = '';
+        document.getElementById('session-status').appendChild(
+          document.createTextNode('PASS SESSION - tự giải mã trong ' + elapsed + ' ms')
+        );
+        document.getElementById('encrypted-content').innerHTML = plaintext;
+      } catch (error) {
+        showFailure('FAILED: Khóa phiên có mặt nhưng không giải mã được trang thứ hai.');
+      }
     };
   }());
   </script>
@@ -136,7 +114,7 @@ b){var c={},d;for(d=0;d<b.length;d++)void 0!==a[b[d]]&&(c[b[d]]=a[b[d]]);return 
   <main>
 
 
-    <section id="passcode-gate" class="passcode-gate"><div class="passcode-ornament">✠</div><h1>ENGLISH BREVIARY</h1><p class="note">Pure JavaScript AES-CCM test for legacy Kindle</p><form id="passcode-form"><label for="breviary-passcode">Passcode</label><input id="breviary-passcode" name="passcode" type="password" inputmode="numeric" autocomplete="off" maxlength="32"><button type="submit">Unlock</button></form><p id="passcode-status" class="passcode-status">Nhập passcode để mở nội dung mẫu.</p></section><p id="decrypt-result" class="decrypt-result"></p><section id="encrypted-content"></section><p id="continue-link" class="session-next" style="display:none"><a href="encrypted-breviary-session-2.html">Sang trang mã hóa thứ hai ›</a></p>
+    <p id="session-status" class="decrypt-result">Đang tìm khóa phiên...</p><section id="encrypted-content"></section><p id="return-to-unlock" class="session-next" style="display:none"><a href="encrypted-breviary-legacy.html">‹ Trở lại trang mở khóa</a></p>
     <nav class="page-nav"><a href="index.html">Về Debug</a></nav>
   </main>
 </body>

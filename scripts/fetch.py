@@ -2754,6 +2754,7 @@ def debug_legacy_encrypted_breviary_script() -> str:
   <script>
   (function () {{
     var CIPHERTEXT = {json.dumps(encrypted_payload)};
+    var SESSION_KEY = 'breviary-debug-key-v1';
 
     function showStatus(message, isError) {{
       var status = document.getElementById('passcode-status');
@@ -2770,20 +2771,37 @@ def debug_legacy_encrypted_breviary_script() -> str:
       }}
       showStatus('Đang kiểm tra và giải mã...', false);
       window.setTimeout(function () {{
+        var details = {{}};
+        var plaintext;
         try {{
-          var plaintext = window.sjcl.decrypt(passcode, CIPHERTEXT);
-          var elapsed = new Date().getTime() - started;
-          document.getElementById('passcode-gate').style.display = 'none';
-          document.getElementById('encrypted-content').innerHTML = plaintext;
-          document.getElementById('decrypt-result').innerHTML = '';
-          document.getElementById('decrypt-result').appendChild(
-            document.createTextNode('PASS LEGACY - giải mã trong ' + elapsed + ' ms')
-          );
+          plaintext = window.sjcl.json.decrypt(passcode, CIPHERTEXT, {{}}, details);
         }} catch (error) {{
           showStatus('Passcode không đúng hoặc Kindle không giải mã được AES-CCM.', true);
           document.getElementById('breviary-passcode').value = '';
           document.getElementById('breviary-passcode').focus();
+          return;
         }}
+        try {{
+          if (!window.sessionStorage) {{ throw new Error('sessionStorage unavailable'); }}
+          window.sessionStorage.setItem(
+            SESSION_KEY,
+            window.sjcl.codec.base64.fromBits(details.key)
+          );
+          if (!window.sessionStorage.getItem(SESSION_KEY)) {{
+            throw new Error('session key was not retained');
+          }}
+        }} catch (storageError) {{
+          showStatus('PASS AES-CCM, nhưng Kindle không lưu được khóa phiên.', true);
+          return;
+        }}
+        var elapsed = new Date().getTime() - started;
+        document.getElementById('passcode-gate').style.display = 'none';
+        document.getElementById('encrypted-content').innerHTML = plaintext;
+        document.getElementById('continue-link').style.display = 'block';
+        document.getElementById('decrypt-result').innerHTML = '';
+        document.getElementById('decrypt-result').appendChild(
+          document.createTextNode('PASS LEGACY + SESSION - giải mã trong ' + elapsed + ' ms')
+        );
       }}, 10);
     }}
 
@@ -2794,6 +2812,62 @@ def debug_legacy_encrypted_breviary_script() -> str:
         return false;
       }};
       document.getElementById('breviary-passcode').focus();
+    }};
+  }}());
+  </script>"""
+
+
+def debug_legacy_session_page_script() -> str:
+    """Decrypt a second page with the derived key retained by sessionStorage."""
+    sjcl_source = SJCL_PATH.read_text(encoding="utf-8").strip()
+    encrypted_payload = (
+        '{"iv":"N6jkPUwZzIPdZbdK","v":1,"iter":2000,"ks":256,"ts":128,'
+        '"mode":"ccm","adata":"","cipher":"aes",'
+        '"salt":"oS2HfbDIGUXWJAqxJh1N+g==",'
+        '"ct":"9OXBzWa3jCVnRsm4qnMEiiF0e/j1CGPTg/blP6tR75uuPy98MYD645QVA5vPWrTO7bQId0NDD0en870wTA6dW7wf2tK4VrsxcYds2kljyfXHRGfDQvKHHMXfGZIusQegPQxN8lzZRs2/87DOKUMj49dx7mKwFciE/38fVr38A1ZgYyo5NWOMBtmGk3XnYtBdH8k9WoW6NIH+lSbRnH8rUYaF3KIlsZaGJAgn9ntWlNAQZvGK2G82Y32ubugvZDjItPo7+1W1xtpJB6EGQffmt4Z9TdzV8rlMLHQn51facv/QeJFPW005i5XDsUSD349MKsV4QIBfXDydF7LVUUVizBWQo7LQ1uuYAU71cC3FpyQntgwr0nW62p+jOvkY9GyOi+WnOuVVnrMD+iQ6vqRLz8FfM2PEGSb+3b9xHMaDj5GplDOMtQ=="}'
+    )
+    return f"""  <script>
+{sjcl_source}
+  </script>
+  <script>
+  (function () {{
+    var CIPHERTEXT = {json.dumps(encrypted_payload)};
+    var SESSION_KEY = 'breviary-debug-key-v1';
+
+    function showFailure(message) {{
+      var status = document.getElementById('session-status');
+      status.className = 'passcode-status passcode-error';
+      status.innerHTML = '';
+      status.appendChild(document.createTextNode(message));
+      document.getElementById('return-to-unlock').style.display = 'block';
+    }}
+
+    window.onload = function () {{
+      var started = new Date().getTime();
+      var encodedKey;
+      try {{
+        if (!window.sessionStorage) {{ throw new Error('sessionStorage unavailable'); }}
+        encodedKey = window.sessionStorage.getItem(SESSION_KEY);
+      }} catch (storageError) {{
+        showFailure('UNSUPPORTED: Kindle không đọc được khóa phiên.');
+        return;
+      }}
+      if (!encodedKey) {{
+        showFailure('LOCKED: Chưa có khóa phiên; hãy mở khóa ở trang đầu.');
+        return;
+      }}
+      try {{
+        var key = window.sjcl.codec.base64.toBits(encodedKey);
+        var plaintext = window.sjcl.json.decrypt(key, CIPHERTEXT);
+        var elapsed = new Date().getTime() - started;
+        document.getElementById('session-status').innerHTML = '';
+        document.getElementById('session-status').appendChild(
+          document.createTextNode('PASS SESSION - tự giải mã trong ' + elapsed + ' ms')
+        );
+        document.getElementById('encrypted-content').innerHTML = plaintext;
+      }} catch (error) {{
+        showFailure('FAILED: Khóa phiên có mặt nhưng không giải mã được trang thứ hai.');
+      }}
     }};
   }}());
   </script>"""
@@ -2899,6 +2973,28 @@ def write_debug_site() -> None:
         encoding="utf-8",
     )
 
+    session_body = (
+        '<p id="session-status" class="decrypt-result">Đang tìm khóa phiên...</p>'
+        '<section id="encrypted-content"></section>'
+        '<p id="return-to-unlock" class="session-next" style="display:none">'
+        '<a href="encrypted-breviary-legacy.html">‹ Trở lại trang mở khóa</a></p>'
+    )
+    (debug_dir / "encrypted-breviary-session-2.html").write_text(
+        page_shell(
+            "Encrypted Breviary Session Page Two",
+            session_body,
+            "",
+            "",
+            show_metadata=False,
+            show_title=False,
+            css_href="../breviary.css?v=5-debug-session",
+            extra_head=debug_legacy_session_page_script(),
+            bottom_nav=encrypted_nav,
+            body_class="breviary-page debug-passcode-page",
+        ),
+        encoding="utf-8",
+    )
+
     legacy_body = (
         '<section id="passcode-gate" class="passcode-gate">'
         '<div class="passcode-ornament">✠</div>'
@@ -2914,6 +3010,8 @@ def write_debug_site() -> None:
         '</section>'
         '<p id="decrypt-result" class="decrypt-result"></p>'
         '<section id="encrypted-content"></section>'
+        '<p id="continue-link" class="session-next" style="display:none">'
+        '<a href="encrypted-breviary-session-2.html">Sang trang mã hóa thứ hai ›</a></p>'
     )
     (debug_dir / "encrypted-breviary-legacy.html").write_text(
         page_shell(

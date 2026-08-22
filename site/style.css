@@ -526,6 +526,20 @@ code {
   text-align: left;
 }
 
+.debug-passcode-page .session-next {
+  margin: 24px 0;
+  text-align: center;
+}
+
+.debug-passcode-page .session-next a {
+  display: inline-block;
+  min-height: 58px;
+  padding: 12px 20px;
+  border: 2px solid #555;
+  font-weight: bold;
+  text-decoration: none;
+}
+
 @media (max-width: 520px) {
   body {
     padding: 20px 30px 20px 30px;
