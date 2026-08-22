@@ -464,6 +464,68 @@ code {
   margin-bottom: 16px;
 }
 
+.debug-passcode-page .passcode-gate {
+  max-width: 620px;
+  margin: 0 auto 26px auto;
+  padding: 22px 20px;
+  border-top: 2px solid #777;
+  border-bottom: 2px solid #777;
+  text-align: center;
+}
+
+.debug-passcode-page .passcode-ornament {
+  margin-bottom: 10px;
+  color: #8b0000;
+  font-size: 1.25em;
+}
+
+.debug-passcode-page label,
+.debug-passcode-page input,
+.debug-passcode-page button {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.debug-passcode-page label {
+  margin: 18px 0 8px 0;
+  font-weight: bold;
+  text-align: left;
+}
+
+.debug-passcode-page input,
+.debug-passcode-page button {
+  min-height: 64px;
+  padding: 10px 12px;
+  border: 2px solid #333;
+  border-radius: 0;
+  background: #fff;
+  color: #111;
+  font: inherit;
+}
+
+.debug-passcode-page button {
+  margin-top: 14px;
+  background: #eee;
+  font-weight: bold;
+}
+
+.debug-passcode-page .passcode-status,
+.debug-passcode-page .decrypt-result {
+  min-height: 1.5em;
+  margin-top: 18px;
+  font-size: 0.82em;
+}
+
+.debug-passcode-page .passcode-error {
+  color: #8b0000;
+  font-weight: bold;
+}
+
+.debug-passcode-page .encrypted-sample {
+  text-align: left;
+}
+
 @media (max-width: 520px) {
   body {
     padding: 20px 30px 20px 30px;

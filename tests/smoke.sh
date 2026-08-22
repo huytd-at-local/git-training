@@ -22,6 +22,7 @@ test -f site/index.html
 test -f site/style.css
 test -f site/debug/index.html
 test -f site/debug/metrics.html
+test -f site/debug/encrypted-breviary.html
 test -f site/breviary/index.html
 test -f site/breviary/kinh-sang.html
 
@@ -31,6 +32,14 @@ grep -q 'window.innerHeight' site/debug/metrics.html
 grep -q 'nav.bottomGap' site/debug/metrics.html
 grep -q 'document.scroll' site/debug/metrics.html
 grep -q 'Đo thông số trình duyệt Kindle' site/debug/index.html
+grep -q 'Thử mở Breviary bằng passcode' site/debug/index.html
+grep -q "AES-GCM" site/debug/encrypted-breviary.html
+grep -q "PBKDF2" site/debug/encrypted-breviary.html
+grep -q "iterations: ITERATIONS" site/debug/encrypted-breviary.html
+grep -q "Passcode không đúng" site/debug/encrypted-breviary.html
+grep -q "UNSUPPORTED:" site/debug/encrypted-breviary.html
+! grep -Eq 'value="[0-9]{6}"' site/debug/encrypted-breviary.html
+! grep -q 'Evening Prayer' site/debug/encrypted-breviary.html
 grep -q 'display: block;' site/style.css
 for file in site/debug/[pPvVrRaAmMbB][0-9][0-9].html; do
   grep -q 'DEBUG [PVRAMB][0-9][0-9]' "$file"

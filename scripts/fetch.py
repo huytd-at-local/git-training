@@ -2641,6 +2641,103 @@ def debug_metrics_script() -> str:
   </script>"""
 
 
+def debug_encrypted_breviary_script() -> str:
+    """Return a dependency-free Web Crypto compatibility test for old Kindle browsers."""
+    return """  <script>
+  (function () {
+    var SALT = 'Z9IDpoZ/eci4SC2KT0NvlQ==';
+    var IV = '3rIF1ha90QVHgVhA';
+    var CIPHERTEXT = 'CwMnvwdEkncrs9ZhSfScfsVkkv2DKnrKJYGQL/XHLmzc4dzHrqK8DwLrKrcqF9f4g95Zx362OHJljk5jRzlRYYJ85Peh2hGi5MOMSUeETGV8O7GN3PtACMaC9A6pV/JU3yjHC+du+wcCvz/Qh2wNNfXW26LavT2iYDjKlXoZl+RpKoYVG5IIutnrue6CKmVTCOM3p6rWN571ppxegFfZbsmeZ+3V/Fkp+vp3rgzrdS0KvuGgC46RR8PINz4a52gWO0xILJTdleaiTsAwunX/yb2W6QKQnIeqs5yO/+91YIzxA7n2Bt+0yKR+ZyspKIIxWIVcGvI4+jHxQq+FRHZLOk87oFDljIs8GM5gWNWopyF8Hks8Pjxv1ks4GK4oKxvM8rOJOvl9crDxvQM3eK3yuZJkNNTL8Cd0IMJc1/sXBWkkt0ToT797Cn4N/QDGT5Pytgila0TIg4sOMhnUzfMK8pMS7NjJdn/SpqDv2VPPbOUzVFK3gNWCsATMtjVtxgRcKMKv9wRJqnYXGJg5IWjtzHXxNi5ICNuUm56iNO6GUYRkSht/4Wouwc7P';
+    var ITERATIONS = 50000;
+
+    function bytesFromBase64(value) {
+      var binary = window.atob(value);
+      var bytes = new Uint8Array(binary.length);
+      var index;
+      for (index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+      }
+      return bytes;
+    }
+
+    function utf8Bytes(value) {
+      var encoded = unescape(encodeURIComponent(value));
+      var bytes = new Uint8Array(encoded.length);
+      var index;
+      for (index = 0; index < encoded.length; index += 1) {
+        bytes[index] = encoded.charCodeAt(index);
+      }
+      return bytes;
+    }
+
+    function utf8Text(buffer) {
+      var bytes = new Uint8Array(buffer);
+      var encoded = '';
+      var index;
+      for (index = 0; index < bytes.length; index += 1) {
+        encoded += String.fromCharCode(bytes[index]);
+      }
+      return decodeURIComponent(escape(encoded));
+    }
+
+    function showStatus(message, isError) {
+      var status = document.getElementById('passcode-status');
+      status.className = isError ? 'passcode-status passcode-error' : 'passcode-status';
+      status.innerHTML = '';
+      status.appendChild(document.createTextNode(message));
+    }
+
+    function unlock(passcode) {
+      var cryptoObject = window.crypto || window.msCrypto;
+      var started = new Date().getTime();
+      if (!cryptoObject || !cryptoObject.subtle || !window.Promise || !window.Uint8Array) {
+        showStatus('UNSUPPORTED: Trình duyệt này không có Web Crypto AES-GCM.', true);
+        return;
+      }
+      showStatus('Đang kiểm tra và giải mã...', false);
+      cryptoObject.subtle.importKey(
+        'raw', utf8Bytes(passcode), {name: 'PBKDF2'}, false, ['deriveKey']
+      ).then(function (baseKey) {
+        return cryptoObject.subtle.deriveKey(
+          {name: 'PBKDF2', salt: bytesFromBase64(SALT), iterations: ITERATIONS, hash: 'SHA-256'},
+          baseKey,
+          {name: 'AES-GCM', length: 256},
+          false,
+          ['decrypt']
+        );
+      }).then(function (key) {
+        return cryptoObject.subtle.decrypt(
+          {name: 'AES-GCM', iv: bytesFromBase64(IV), tagLength: 128},
+          key,
+          bytesFromBase64(CIPHERTEXT)
+        );
+      }).then(function (plaintext) {
+        var elapsed = new Date().getTime() - started;
+        document.getElementById('passcode-gate').style.display = 'none';
+        document.getElementById('encrypted-content').innerHTML = utf8Text(plaintext);
+        document.getElementById('decrypt-result').innerHTML = '';
+        document.getElementById('decrypt-result').appendChild(
+          document.createTextNode('PASS - giải mã trong ' + elapsed + ' ms')
+        );
+      }).catch(function () {
+        showStatus('Passcode không đúng hoặc trình duyệt không giải mã được.', true);
+        document.getElementById('breviary-passcode').value = '';
+        document.getElementById('breviary-passcode').focus();
+      });
+    }
+
+    window.onload = function () {
+      var form = document.getElementById('passcode-form');
+      form.onsubmit = function () {
+        unlock(document.getElementById('breviary-passcode').value);
+        return false;
+      };
+      document.getElementById('breviary-passcode').focus();
+    };
+  }());
+  </script>"""
+
+
 def write_debug_site() -> None:
     debug_dir = SITE_DIR / "debug"
     debug_dir.mkdir(parents=True, exist_ok=True)
@@ -2660,6 +2757,7 @@ def write_debug_site() -> None:
         '<section class="debug-intro">'
         '<p>Mở trang thông số trước, sau đó thử các mẫu. Không cuộn trang trước khi chụp ảnh.</p>'
         '<p><a href="metrics.html">Đo thông số trình duyệt Kindle</a></p>'
+        '<p><a href="encrypted-breviary.html">Thử mở Breviary bằng passcode</a></p>'
         '</section>'
     ]
     for heading, group in groups:
@@ -2702,6 +2800,39 @@ def write_debug_site() -> None:
             extra_head=debug_metrics_script(),
             bottom_nav=metrics_nav,
             body_class="debug-page debug-metrics",
+        ),
+        encoding="utf-8",
+    )
+
+    encrypted_body = (
+        '<section id="passcode-gate" class="passcode-gate">'
+        '<div class="passcode-ornament">✠</div>'
+        '<h1>ENGLISH BREVIARY</h1>'
+        '<p class="note">AES-GCM compatibility test for Kindle Paperwhite 3</p>'
+        '<form id="passcode-form">'
+        '<label for="breviary-passcode">Passcode</label>'
+        '<input id="breviary-passcode" name="passcode" type="password" inputmode="numeric" '
+        'autocomplete="off" maxlength="32">'
+        '<button type="submit">Unlock</button>'
+        '</form>'
+        '<p id="passcode-status" class="passcode-status">Nhập passcode để mở nội dung mẫu.</p>'
+        '</section>'
+        '<p id="decrypt-result" class="decrypt-result"></p>'
+        '<section id="encrypted-content"></section>'
+    )
+    encrypted_nav = '<nav class="page-nav"><a href="index.html">Về Debug</a></nav>'
+    (debug_dir / "encrypted-breviary.html").write_text(
+        page_shell(
+            "Encrypted English Breviary Test",
+            encrypted_body,
+            "",
+            "",
+            show_metadata=False,
+            show_title=False,
+            css_href="../breviary.css?v=3-debug-passcode",
+            extra_head=debug_encrypted_breviary_script(),
+            bottom_nav=encrypted_nav,
+            body_class="breviary-page debug-passcode-page",
         ),
         encoding="utf-8",
     )
@@ -2951,6 +3082,7 @@ def main() -> int:
     try:
         if args.debug_only:
             SITE_DIR.mkdir(parents=True, exist_ok=True)
+            write_breviary_stylesheet()
             write_debug_site()
             logging.info("Generated Kindle calibration pages in %s", (SITE_DIR / "debug").relative_to(ROOT))
             return 0
