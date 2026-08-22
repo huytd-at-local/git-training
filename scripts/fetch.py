@@ -2798,7 +2798,10 @@ def english_prayer_inner(
 
 
 def english_unlock_script(ciphertext: dict) -> str:
-    payload = json.dumps(ciphertext, separators=(",", ":"))
+    # Kindle WebKit 534 has already proven reliable with SJCL's encoded JSON
+    # string path on /debug.  Passing the decoded object takes a different
+    # compatibility path inside sjcl.json.decrypt and can fail on that engine.
+    payload = json.dumps(json.dumps(ciphertext, separators=(",", ":")))
     return f"""  <script>
   (function () {{
     var CIPHERTEXT = {payload};
@@ -2820,17 +2823,32 @@ def english_unlock_script(ciphertext: dict) -> str:
       status('Unlocking...', false);
       window.setTimeout(function () {{
         var details = {{}};
+        var plaintext;
         try {{
-          var plaintext = window.sjcl.json.decrypt(passcode, CIPHERTEXT, {{}}, details);
+          plaintext = window.sjcl.json.decrypt(passcode, CIPHERTEXT, {{}}, details);
+        }} catch (decryptError) {{
+          status('Incorrect passcode.', true);
+          document.getElementById('breviary-passcode').value = '';
+          document.getElementById('breviary-passcode').focus();
+          return;
+        }}
+        try {{
           window.sessionStorage.setItem(
             SESSION_KEY,
             window.sjcl.codec.base64.fromBits(details.key)
           );
+          if (!window.sessionStorage.getItem(SESSION_KEY)) {{
+            throw new Error('session key was not retained');
+          }}
+        }} catch (storageError) {{
           reveal(plaintext);
-        }} catch (error) {{
-          status('Incorrect passcode.', true);
-          document.getElementById('breviary-passcode').value = '';
-          document.getElementById('breviary-passcode').focus();
+          status('Unlocked, but this browser could not retain the session key.', true);
+          return;
+        }}
+        try {{
+          reveal(plaintext);
+        }} catch (displayError) {{
+          status('Unlocked, but the page could not be displayed.', true);
         }}
       }}, 10);
     }}
@@ -2857,7 +2875,7 @@ def english_unlock_script(ciphertext: dict) -> str:
 
 
 def english_session_script(ciphertext: dict, unlock_href: str) -> str:
-    payload = json.dumps(ciphertext, separators=(",", ":"))
+    payload = json.dumps(json.dumps(ciphertext, separators=(",", ":")))
     return f"""  <script>
   (function () {{
     var CIPHERTEXT = {payload};

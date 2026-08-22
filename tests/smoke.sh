@@ -67,6 +67,8 @@ if test -d site/breviary/en; then
   test -f site/breviary/en/index.html
   grep -q 'breviary-en-key-v1' site/breviary/en/index.html
   grep -q 'mode.*ccm' site/breviary/en/index.html
+  grep -q 'var CIPHERTEXT = "{\\"iv\\"' site/breviary/en/index.html
+  grep -q 'session key was not retained' site/breviary/en/index.html
   ! grep -R -q '<script[^>]* src=' site/breviary/en
   ! grep -R -q 'Office of Readings' site/breviary/en
   ! grep -R -q 'Morning Prayer' site/breviary/en
