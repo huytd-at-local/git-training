@@ -342,10 +342,10 @@ LEARNER_LEFT_CHARS_PER_LINE = 18
 LEARNER_RIGHT_CHARS_PER_LINE = 16
 LEARNER_ROW_SPACING_UNITS = 0.36
 LEARNER_MAX_FRAGMENT_CHARS = 92
-LEARNER_GUIDANCE_BATCH_SIZE = 120
+LEARNER_GUIDANCE_BATCH_SIZE = 300
 LEARNER_GLOSSARY_BATCH_SIZE = 4
 LEARNER_MAX_RETRIES = 3
-LEARNER_MAX_RETRY_SECONDS = 30
+LEARNER_MAX_RETRY_SECONDS = 60
 LEARNER_CACHE_FILE = CACHE_DIR / "breviary-learner-language-v2.json"
 
 LABEL_PATTERNS = [
@@ -813,13 +813,17 @@ def gemini_response_text(response: dict) -> str:
 
 def gemini_retry_seconds(response: requests.Response) -> float:
     retry_after = response.headers.get("retry-after", "").strip()
+    candidates: list[float] = []
     try:
-        return max(1.0, min(float(retry_after), LEARNER_MAX_RETRY_SECONDS))
+        candidates.append(float(retry_after))
     except ValueError:
-        match = re.search(r"retry in\\s+(\\d+(?:\\.\\d+)?)s", response.text, flags=re.IGNORECASE)
-        if match:
-            return max(1.0, min(float(match.group(1)), LEARNER_MAX_RETRY_SECONDS))
-    return 5.0
+        pass
+    match = re.search(r"retry in\s+(\d+(?:\.\d+)?)s", response.text, flags=re.IGNORECASE)
+    if match:
+        candidates.append(float(match.group(1)))
+    if candidates:
+        return max(1.0, min(max(candidates), LEARNER_MAX_RETRY_SECONDS))
+    return 10.0
 
 
 class LearnerLanguage:

@@ -162,6 +162,7 @@ from scripts.fetch import (
     debug_prose,
     debug_verse,
     english_prayer_inner,
+    gemini_retry_seconds,
     html_blocks,
     learner_html_blocks,
     learner_page_units,
@@ -231,6 +232,13 @@ if gemini_call["headers"].get("x-goog-api-key") != "test-key":
 config = gemini_call["json"].get("generationConfig", {})
 if config.get("responseMimeType") != "application/json" or "responseJsonSchema" not in config:
     raise SystemExit("Learner request does not enforce Gemini structured JSON output")
+
+class FakeRateLimitedGeminiResponse:
+    headers = {"retry-after": "5"}
+    text = "Please retry in 51.5s."
+
+if gemini_retry_seconds(FakeRateLimitedGeminiResponse()) != 51.5:
+    raise SystemExit("Learner retry must respect the longer Gemini quota delay")
 
 class FakeLearnerLanguage:
     def pronunciations(self, texts):
