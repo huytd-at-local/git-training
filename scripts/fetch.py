@@ -342,8 +342,14 @@ LEARNER_LEFT_CHARS_PER_LINE = 18
 LEARNER_RIGHT_CHARS_PER_LINE = 16
 LEARNER_ROW_SPACING_UNITS = 0.36
 LEARNER_MAX_FRAGMENT_CHARS = 92
-LEARNER_GUIDANCE_BATCH_SIZE = 300
-LEARNER_GLOSSARY_BATCH_SIZE = 4
+# The Gemini free tier currently exposes a 20-requests-per-minute ceiling for
+# this project.  A full three-day learner build contains about 2,200 distinct
+# source lines.  These limits keep a cold-cache build to seven requests:
+# four pronunciation batches, two glossary batches, and one glossary-guide
+# batch.  They are deliberately based on the real Divine Office payload, not
+# the smaller debug fixture.
+LEARNER_GUIDANCE_BATCH_SIZE = 600
+LEARNER_GLOSSARY_BATCH_SIZE = 12
 LEARNER_MAX_RETRIES = 3
 LEARNER_MAX_RETRY_SECONDS = 60
 LEARNER_CACHE_FILE = CACHE_DIR / "breviary-learner-language-v2.json"
