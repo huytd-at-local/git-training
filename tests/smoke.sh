@@ -143,10 +143,11 @@ if test -f .cache/source.html && grep -Eq '<(em|i)([ >])' .cache/source.html; th
 fi
 
 "$PYTHON_BIN" - <<'PY'
+import os
 import re
 import tempfile
 import unicodedata
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from bs4 import BeautifulSoup
 import scripts.fetch as fetch_module
@@ -174,6 +175,7 @@ from scripts.fetch import (
     EnglishDaySite,
     LiturgicalDay,
     LearnerLanguage,
+    build_english_breviary,
     write_english_breviary,
     write_english_learner,
 )
@@ -306,6 +308,50 @@ if len(batch_language.glossary_calls[0]) != len(ENGLISH_PRAYERS):
     raise SystemExit("Learner glossary work must include all prayers in one preparation pass")
 if set(batched_bodies["2026-08-23"]) != {slug for _, slug in ENGLISH_PRAYERS}:
     raise SystemExit("Batched learner preparation omitted a prayer")
+
+# The ordinary English Breviary remains a three-day edition, but learner
+# generation must spend its free API budget only on the current day.
+def learner_test_site(date):
+    return EnglishDaySite(
+        date=date,
+        liturgical_day=test_day.liturgical_day,
+        prayers=test_day.prayers,
+    )
+
+learner_today = datetime(2026, 8, 23, tzinfo=fetch_module.VN_TZ)
+learner_sites_by_date = {
+    (learner_today + timedelta(days=offset)).date(): learner_test_site(
+        (learner_today + timedelta(days=offset)).date()
+    )
+    for offset in (-1, 0, 1)
+}
+original_fetch_english_day = fetch_module.fetch_english_day
+original_learner_language = fetch_module.LearnerLanguage
+original_write_english_breviary = fetch_module.write_english_breviary
+original_write_english_learner = fetch_module.write_english_learner
+original_learner_key = os.environ.get(fetch_module.LEARNER_GEMINI_API_KEY_ENV)
+today_only_language = BatchLearnerLanguage()
+learner_write_sites = []
+try:
+    fetch_module.fetch_english_day = lambda _session, date: learner_sites_by_date[date.date()]
+    fetch_module.LearnerLanguage = lambda _key: today_only_language
+    fetch_module.write_english_breviary = lambda *_args, **_kwargs: None
+    fetch_module.write_english_learner = lambda sites, *_args: learner_write_sites.append(sites)
+    os.environ[fetch_module.LEARNER_GEMINI_API_KEY_ENV] = "test-key"
+    build_english_breviary(learner_today, "123456")
+finally:
+    fetch_module.fetch_english_day = original_fetch_english_day
+    fetch_module.LearnerLanguage = original_learner_language
+    fetch_module.write_english_breviary = original_write_english_breviary
+    fetch_module.write_english_learner = original_write_english_learner
+    if original_learner_key is None:
+        os.environ.pop(fetch_module.LEARNER_GEMINI_API_KEY_ENV, None)
+    else:
+        os.environ[fetch_module.LEARNER_GEMINI_API_KEY_ENV] = original_learner_key
+if len(today_only_language.glossary_calls) != 1 or len(today_only_language.glossary_calls[0]) != len(ENGLISH_PRAYERS):
+    raise SystemExit("Learner build must generate glossaries for today only")
+if len(learner_write_sites) != 1 or [site.date for site in learner_write_sites[0]] != [learner_today.date()]:
+    raise SystemExit("Learner writer must receive today only")
 
 with tempfile.TemporaryDirectory() as temporary_dir:
     original_site_dir = fetch_module.SITE_DIR

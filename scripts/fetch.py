@@ -4023,7 +4023,12 @@ def build_english_breviary(run_date: datetime, passcode: str) -> None:
         language = LearnerLanguage(learner_api_key)
         # Enrich before touching site/breviary/en so a failed language request
         # leaves both the regular and learner editions from the prior build.
-        learner_bodies = prepare_english_learner_bodies(sites, language)
+        # The learner edition is intentionally today-only.  It keeps the
+        # paired Kindle layout focused on the current Office and, with the
+        # Gemini free-tier request budget, avoids generating three complete
+        # days of pronunciation and glossary material on every refresh.
+        learner_sites = [sites[1]]
+        learner_bodies = prepare_english_learner_bodies(learner_sites, language)
     existing_learner = (SITE_DIR / "breviary" / "en" / "learner").is_dir()
     write_english_breviary(
         sites,
@@ -4032,7 +4037,7 @@ def build_english_breviary(run_date: datetime, passcode: str) -> None:
         include_learner_link=learner_bodies is not None or existing_learner,
     )
     if learner_bodies is not None:
-        write_english_learner(sites, passcode, learner_bodies)
+        write_english_learner(learner_sites, passcode, learner_bodies)
 
 
 DEBUG_PROSE = (
