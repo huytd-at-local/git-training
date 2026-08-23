@@ -9,6 +9,9 @@ test -f .github/workflows/retry-pages-deployment.yml
 grep -q '^  build:$' .github/workflows/pages.yml
 grep -q '^  deploy:$' .github/workflows/pages.yml
 grep -q '^    needs: build$' .github/workflows/pages.yml
+grep -q 'Restore encrypted English learner edition' .github/workflows/pages.yml
+grep -q 'Seed encrypted learner edition from Pages artifact' .github/workflows/pages.yml
+grep -q 'BREVIARY_REFRESH_LEARNER' .github/workflows/pages.yml
 grep -q 'actions/upload-pages-artifact@v4' .github/workflows/pages.yml
 grep -q 'actions/deploy-pages@v4' .github/workflows/pages.yml
 grep -q '^  actions: write$' .github/workflows/retry-pages-deployment.yml
@@ -372,6 +375,7 @@ original_learner_language = fetch_module.LearnerLanguage
 original_write_english_breviary = fetch_module.write_english_breviary
 original_write_english_learner = fetch_module.write_english_learner
 original_learner_key = os.environ.get(fetch_module.LEARNER_GEMINI_API_KEY_ENV)
+original_learner_refresh = os.environ.get(fetch_module.LEARNER_REFRESH_ENV)
 today_only_language = BatchLearnerLanguage()
 learner_write_sites = []
 try:
@@ -380,6 +384,7 @@ try:
     fetch_module.write_english_breviary = lambda *_args, **_kwargs: None
     fetch_module.write_english_learner = lambda sites, *_args: learner_write_sites.append(sites)
     os.environ[fetch_module.LEARNER_GEMINI_API_KEY_ENV] = "test-key"
+    os.environ[fetch_module.LEARNER_REFRESH_ENV] = "1"
     build_english_breviary(learner_today, "123456")
 finally:
     fetch_module.fetch_english_day = original_fetch_english_day
@@ -390,10 +395,59 @@ finally:
         os.environ.pop(fetch_module.LEARNER_GEMINI_API_KEY_ENV, None)
     else:
         os.environ[fetch_module.LEARNER_GEMINI_API_KEY_ENV] = original_learner_key
+    if original_learner_refresh is None:
+        os.environ.pop(fetch_module.LEARNER_REFRESH_ENV, None)
+    else:
+        os.environ[fetch_module.LEARNER_REFRESH_ENV] = original_learner_refresh
 if len(today_only_language.glossary_calls) != 1 or len(today_only_language.glossary_calls[0]) != len(ENGLISH_PRAYERS):
     raise SystemExit("Learner build must generate glossaries for today only")
 if len(learner_write_sites) != 1 or [site.date for site in learner_write_sites[0]] != [learner_today.date()]:
     raise SystemExit("Learner writer must receive today only")
+
+# A normal push preserves the encrypted learner directory restored from the
+# Actions cache and must not spend Gemini quota again.
+preserved_builds = []
+original_site_dir = fetch_module.SITE_DIR
+try:
+    with tempfile.TemporaryDirectory() as temporary_dir:
+        fetch_module.SITE_DIR = Path(temporary_dir) / "site"
+        learner_root = fetch_module.SITE_DIR / "breviary" / "en" / "learner"
+        learner_root.mkdir(parents=True)
+        preserved_page = learner_root / "index.html"
+        preserved_page.write_text(
+            '<link rel="stylesheet" href="../../../breviary.css?v=4-encrypted-learner">',
+            encoding="utf-8",
+        )
+        fetch_module.refresh_preserved_learner_stylesheet(learner_root)
+        if f"v={fetch_module.BREVIARY_CSS_VERSION}-encrypted-learner" not in preserved_page.read_text(encoding="utf-8"):
+            raise SystemExit("Preserved learner CSS reference was not cache-busted")
+        fetch_module.fetch_english_day = lambda _session, date: learner_sites_by_date[date.date()]
+        fetch_module.LearnerLanguage = lambda *_args: (_ for _ in ()).throw(
+            SystemExit("A push with a cached learner must not call Gemini")
+        )
+        fetch_module.write_english_breviary = lambda *_args, **kwargs: preserved_builds.append(kwargs)
+        fetch_module.write_english_learner = lambda *_args: (_ for _ in ()).throw(
+            SystemExit("A push with a cached learner must not rewrite it")
+        )
+        os.environ[fetch_module.LEARNER_GEMINI_API_KEY_ENV] = "test-key"
+        os.environ[fetch_module.LEARNER_REFRESH_ENV] = "0"
+        build_english_breviary(learner_today, "123456")
+finally:
+    fetch_module.SITE_DIR = original_site_dir
+    fetch_module.fetch_english_day = original_fetch_english_day
+    fetch_module.LearnerLanguage = original_learner_language
+    fetch_module.write_english_breviary = original_write_english_breviary
+    fetch_module.write_english_learner = original_write_english_learner
+    if original_learner_key is None:
+        os.environ.pop(fetch_module.LEARNER_GEMINI_API_KEY_ENV, None)
+    else:
+        os.environ[fetch_module.LEARNER_GEMINI_API_KEY_ENV] = original_learner_key
+    if original_learner_refresh is None:
+        os.environ.pop(fetch_module.LEARNER_REFRESH_ENV, None)
+    else:
+        os.environ[fetch_module.LEARNER_REFRESH_ENV] = original_learner_refresh
+if preserved_builds != [{"preserve_learner": True, "include_learner_link": True}]:
+    raise SystemExit("A push must preserve the cached learner edition")
 
 with tempfile.TemporaryDirectory() as temporary_dir:
     original_site_dir = fetch_module.SITE_DIR

@@ -29,6 +29,7 @@ DIVINE_OFFICE_URL = "https://divineoffice.org/"
 ENGLISH_BREVIARY_PASSCODE_ENV = "BREVIARY_EN_PASSCODE"
 LEARNER_GEMINI_API_KEY_ENV = "BREVIARY_LEARNER_GEMINI_API_KEY"
 LEARNER_GEMINI_MODEL_ENV = "BREVIARY_LEARNER_GEMINI_MODEL"
+LEARNER_REFRESH_ENV = "BREVIARY_REFRESH_LEARNER"
 LEARNER_GEMINI_DEFAULT_MODEL = "gemini-3.6-flash"
 GEMINI_GENERATE_CONTENT_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 TIMEOUT_SECONDS = 30
@@ -308,7 +309,7 @@ BREVIARY_CSS = """
       margin-top: 14px;
     }
 """
-BREVIARY_CSS_VERSION = "4"
+BREVIARY_CSS_VERSION = "5"
 
 PAGE_TARGET_UNITS = 17.4
 FIRST_PAGE_TARGET_UNITS = 14.4
@@ -3847,7 +3848,27 @@ def write_english_breviary(
     temporary.rename(target_root)
     if learner_hold.exists():
         learner_hold.rename(target_root / "learner")
+        refresh_preserved_learner_stylesheet(target_root / "learner")
     logging.info("Generated %d encrypted English Breviary pages", len(outputs))
+
+
+def refresh_preserved_learner_stylesheet(learner_root: Path) -> None:
+    """Point preserved encrypted learner shells at the current local CSS.
+
+    The learner HTML is cached between workflow runs so ordinary CSS-only
+    deploys do not call Gemini.  Its outer shell is safe to update: the prayer
+    text remains encrypted and untouched.
+    """
+    stylesheet = f"breviary.css?v={BREVIARY_CSS_VERSION}-encrypted-learner"
+    for page in learner_root.rglob("*.html"):
+        original = page.read_text(encoding="utf-8")
+        updated = re.sub(
+            r"breviary\.css\?v=\d+-encrypted-learner",
+            stylesheet,
+            original,
+        )
+        if updated != original:
+            page.write_text(updated, encoding="utf-8")
 
 
 def prepare_english_learner_bodies(
@@ -3935,7 +3956,7 @@ def write_english_learner(
     add_document(
         "learner-root-index",
         target_root / "index.html",
-        "../../../breviary.css?v=4-encrypted-learner",
+        f"../../../breviary.css?v={BREVIARY_CSS_VERSION}-encrypted-learner",
         learner_index_inner(today, available_dates, updated, ""),
         unlock_page=True,
     )
@@ -3943,9 +3964,9 @@ def write_english_learner(
     def add_site_documents(site: EnglishDaySite, target_dir: Path, prefix: str, dated: bool) -> None:
         date_name = date_dir_name(site.date)
         css_href = (
-            "../../../../breviary.css?v=4-encrypted-learner"
+            f"../../../../breviary.css?v={BREVIARY_CSS_VERSION}-encrypted-learner"
             if dated
-            else "../../../breviary.css?v=4-encrypted-learner"
+            else f"../../../breviary.css?v={BREVIARY_CSS_VERSION}-encrypted-learner"
         )
         unlock_href = "../index.html" if dated else "index.html"
         if dated:
@@ -4039,13 +4060,15 @@ def build_english_breviary(run_date: datetime, passcode: str) -> None:
         for date in (run_date - timedelta(days=1), run_date, run_date + timedelta(days=1))
     ]
     learner_api_key = os.environ.get(LEARNER_GEMINI_API_KEY_ENV, "")
+    existing_learner = (SITE_DIR / "breviary" / "en" / "learner").is_dir()
+    refresh_learner = os.environ.get(LEARNER_REFRESH_ENV, "").strip() == "1"
     learner_bodies: dict[str, dict[str, str]] | None = None
     if not learner_api_key:
         logging.warning(
             "%s is not configured; preserving the last English learner edition",
             LEARNER_GEMINI_API_KEY_ENV,
         )
-    else:
+    elif refresh_learner or not existing_learner:
         language = LearnerLanguage(learner_api_key)
         # Enrich before touching site/breviary/en so a failed language request
         # leaves both the regular and learner editions from the prior build.
@@ -4055,7 +4078,11 @@ def build_english_breviary(run_date: datetime, passcode: str) -> None:
         # days of pronunciation and glossary material on every refresh.
         learner_sites = [sites[1]]
         learner_bodies = prepare_english_learner_bodies(learner_sites, language)
-    existing_learner = (SITE_DIR / "breviary" / "en" / "learner").is_dir()
+    else:
+        logging.info(
+            "Preserving the cached English learner edition; set %s=1 to refresh it",
+            LEARNER_REFRESH_ENV,
+        )
     write_english_breviary(
         sites,
         passcode,
