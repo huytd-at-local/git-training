@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable
+from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup, Comment, NavigableString, Tag
@@ -22,10 +23,8 @@ from zoneinfo import ZoneInfo
 
 
 SOURCE_URL = "https://ktcgkpv.org/readings/prayer"
-IBREVIARY_BASE_URL = "https://www.ibreviary.com/m2"
-IBREVIARY_OPTIONS_URL = f"{IBREVIARY_BASE_URL}/opzioni.php"
-IBREVIARY_URL = f"{IBREVIARY_BASE_URL}/breviario.php"
-IBREVIARY_PASSCODE_ENV = "BREVIARY_EN_PASSCODE"
+DIVINE_OFFICE_URL = "https://divineoffice.org/"
+ENGLISH_BREVIARY_PASSCODE_ENV = "BREVIARY_EN_PASSCODE"
 TIMEOUT_SECONDS = 30
 ROOT = Path(__file__).resolve().parents[1]
 SITE_DIR = ROOT / "site"
@@ -77,11 +76,14 @@ PRAYERS = [
 ]
 
 ENGLISH_PRAYERS = [
-    ("Office of Readings", "office-of-readings", "ufficio_delle_letture"),
-    ("Morning Prayer", "morning-prayer", "lodi"),
-    ("Daytime Prayers", "daytime-prayers", "ora_media"),
-    ("Evening Prayer", "evening-prayer", "vespri"),
-    ("Night Prayer", "night-prayer", "compieta"),
+    ("Invitatory", "invitatory"),
+    ("Office of Readings", "office-of-readings"),
+    ("Morning Prayer", "morning-prayer"),
+    ("Midmorning Prayer", "midmorning-prayer"),
+    ("Midday Prayer", "midday-prayer"),
+    ("Midafternoon Prayer", "midafternoon-prayer"),
+    ("Evening Prayer", "evening-prayer"),
+    ("Night Prayer", "night-prayer"),
 ]
 ENGLISH_SESSION_KEY = "breviary-en-key-v1"
 ENCRYPT_HELPER = ROOT / "scripts" / "encrypt_breviary.js"
@@ -447,22 +449,14 @@ def fetch_prayer_json(
     return payload["data"]
 
 
-def ibreviary_request(
-    session: requests.Session,
-    url: str,
-    *,
-    data: dict[str, str | int] | None = None,
-) -> str:
-    method = "POST" if data is not None else "GET"
-    logging.info("Fetching iBreviary %s %s", method, url)
-    response = session.request(
-        method,
+def divineoffice_request(session: requests.Session, url: str) -> str:
+    logging.info("Fetching Divine Office %s", url)
+    response = session.get(
         url,
-        data=data,
         headers={
             "User-Agent": USER_AGENT,
             "Accept": "text/html,application/xhtml+xml",
-            "Referer": IBREVIARY_URL,
+            "Referer": DIVINE_OFFICE_URL,
         },
         timeout=TIMEOUT_SECONDS,
     )
@@ -471,36 +465,7 @@ def ibreviary_request(
     return response.text
 
 
-def configure_ibreviary_date(session: requests.Session, date: datetime) -> None:
-    source = ibreviary_request(
-        session,
-        IBREVIARY_OPTIONS_URL,
-        data={
-            "lang": "en",
-            "giorno": date.day,
-            "mese": date.month,
-            "anno": date.year,
-            "ok": "ok",
-        },
-    )
-    soup = BeautifulSoup(source, "lxml")
-    selected_language = soup.select_one('input[name="lang"][value="en"][checked]')
-    selected_day = soup.select_one('input[name="giorno"]')
-    selected_month = soup.select_one('select[name="mese"] option[selected]')
-    selected_year = soup.select_one('input[name="anno"]')
-    if not selected_language:
-        raise ValueError("iBreviary did not retain the English language setting")
-    actual = (
-        int(selected_day.get("value", "0")) if selected_day else 0,
-        int(selected_month.get("value", "0")) if selected_month else 0,
-        int(selected_year.get("value", "0")) if selected_year else 0,
-    )
-    expected = (date.day, date.month, date.year)
-    if actual != expected:
-        raise ValueError(f"iBreviary retained date {actual}, expected {expected}")
-
-
-def ibreviary_inline_tokens(node, inherited_class: str = "") -> list[str | None]:
+def divineoffice_inline_tokens(node, inherited_class: str = "") -> list[str | None]:
     if isinstance(node, Comment):
         return []
     if isinstance(node, NavigableString):
@@ -520,16 +485,15 @@ def ibreviary_inline_tokens(node, inherited_class: str = "") -> list[str | None]
 
     classes = set(node.get("class", []))
     child_class = inherited_class
-    if "capolettera_piccolo" in classes:
-        child_class = "source-heading"
-    elif "rubrica" in classes:
+    style = str(node.get("style", "")).lower().replace(" ", "")
+    if "color:#ff0000" in style or "color:red" in style:
         child_class = "rubric"
-    elif "citazione" in classes:
+    elif "note" in classes:
         child_class = "note"
 
     tokens: list[str | None] = []
     for child in node.children:
-        tokens.extend(ibreviary_inline_tokens(child, child_class))
+        tokens.extend(divineoffice_inline_tokens(child, child_class))
 
     if node.name in {"em", "i", "strong", "b"} and not child_class:
         tag_name = "strong" if node.name in {"strong", "b"} else "em"
@@ -540,15 +504,37 @@ def ibreviary_inline_tokens(node, inherited_class: str = "") -> list[str | None]
     return tokens
 
 
-def render_ibreviary_group(lines: list[str]) -> str:
+def divineoffice_heading_level(value: str) -> int | None:
+    key = normalize_key(value)
+    if key in {
+        "hymn",
+        "psalmody",
+        "reading",
+        "readings",
+        "responsory",
+        "canticle of zechariah",
+        "canticle of mary",
+        "intercessions",
+        "concluding prayer",
+        "dismissal",
+        "acclamation",
+    }:
+        return 2
+    if key.startswith(("psalm ", "canticle ", "gospel canticle", "reading ")):
+        return 3
+    return None
+
+
+def render_divineoffice_group(lines: list[str]) -> str:
     joined = " ".join(lines)
     soup = BeautifulSoup(f"<div>{joined}</div>", "lxml")
     wrapper = soup.find("div")
     plain = wrapper.get_text(" ", strip=True) if wrapper else ""
     if not plain:
         return ""
-    if wrapper and wrapper.select_one(".source-heading"):
-        return f"<h2>{html.escape(plain)}</h2>"
+    heading_level = divineoffice_heading_level(plain) if wrapper and wrapper.select_one(".rubric") else None
+    if heading_level:
+        return f"<h{heading_level}>{html.escape(plain)}</h{heading_level}>"
     if len(lines) == 1 and lines[0].lstrip().startswith('<span class="rubric">'):
         return f'<p class="label">{lines[0]}</p>'
     if len(lines) == 1:
@@ -556,8 +542,8 @@ def render_ibreviary_group(lines: list[str]) -> str:
     return '<div class="stanza">' + "".join(f"<div>{line}</div>" for line in lines) + "</div>"
 
 
-def render_ibreviary_paragraph(node: Tag) -> list[str]:
-    tokens = ibreviary_inline_tokens(node)
+def render_divineoffice_paragraph(node: Tag) -> list[str]:
+    tokens = divineoffice_inline_tokens(node)
     raw_lines: list[str] = []
     current = ""
     for token in tokens:
@@ -575,63 +561,91 @@ def render_ibreviary_paragraph(node: Tag) -> list[str]:
             group.append(line)
             continue
         if group:
-            block = render_ibreviary_group(group)
+            block = render_divineoffice_group(group)
             if block:
                 rendered.append(block)
             group = []
     if group:
-        block = render_ibreviary_group(group)
+        block = render_divineoffice_group(group)
         if block:
             rendered.append(block)
     return rendered
 
 
-def parse_ibreviary_prayer(source: str, title: str, slug: str) -> Prayer:
+def is_divineoffice_content_paragraph(node: Tag) -> bool:
+    if node.find_parent(["audio", "table", "style", "script"]):
+        return False
+    for parent in [node, *node.parents]:
+        if not isinstance(parent, Tag):
+            continue
+        classes = " ".join(parent.get("class", []))
+        if any(
+            value in classes
+            for value in ("powerpress_player", "table-container", "stc-content-filter", "no-print")
+        ):
+            return False
+    return True
+
+
+def parse_divineoffice_prayer(source: str, title: str, slug: str) -> Prayer:
     soup = BeautifulSoup(source, "lxml")
-    inner = soup.select_one("#contenuto .inner")
-    if not inner:
-        raise ValueError(f"iBreviary content container missing for {title}")
+    intro = soup.select_one(".section-intro.is-prayer")
+    entry = intro.find_next_sibling("div", class_="entry") if isinstance(intro, Tag) else None
+    if not isinstance(entry, Tag):
+        raise ValueError(f"Divine Office prayer content container missing for {title}")
 
     blocks: list[str] = []
-    started = False
-    for node in list(inner.children):
-        if not isinstance(node, Tag):
+    started = title == "Invitatory"
+    title_key = normalize_key(title)
+    for node in entry.find_all("p"):
+        if not is_divineoffice_content_paragraph(node):
             continue
+        text = node.get_text(" ", strip=True)
+        key = normalize_key(text)
         if not started:
-            section = node.select_one(".sezione")
-            if section and normalize_key(section.get_text(" ", strip=True)) == normalize_key(title):
+            if key.startswith(title_key):
                 started = True
             continue
-        if node.name == "p" and node.get_text(" ", strip=True).strip() == "******":
+        if key.startswith("please help us bring the liturgy of the hours"):
             break
-        if node.name == "hr":
-            blocks.append('<div class="medieval-rule" aria-hidden="true">✠</div>')
-        elif node.name == "p":
-            blocks.extend(render_ibreviary_paragraph(node))
+        blocks.extend(render_divineoffice_paragraph(node))
 
     body_html = "\n".join(block for block in blocks if block.strip())
     if not started or len(BeautifulSoup(body_html, "lxml").get_text(" ", strip=True)) < 100:
-        raise ValueError(f"iBreviary prayer content missing or too short for {title}")
+        raise ValueError(f"Divine Office prayer content missing or too short for {title}")
     return Prayer(title, slug, body_html)
 
 
 def fetch_english_day(session: requests.Session, date: datetime) -> EnglishDaySite:
-    configure_ibreviary_date(session, date)
-    index_source = ibreviary_request(session, IBREVIARY_URL)
+    date_query = date.strftime("%Y%m%d")
+    index_source = divineoffice_request(session, f"{DIVINE_OFFICE_URL}?date={date_query}")
     index_soup = BeautifulSoup(index_source, "lxml")
-    inner = index_soup.select_one("#contenuto .inner")
-    paragraphs = inner.find_all("p", recursive=False) if inner else []
-    if len(paragraphs) < 3:
-        raise ValueError("iBreviary index metadata is incomplete")
-    date_title = paragraphs[0].get_text(" ", strip=True)
-    day_title = paragraphs[1].get_text(" ", strip=True)
-    rank = paragraphs[2].get_text(" ", strip=True)
-    liturgical_day = LiturgicalDay(day_title, rank, "iBreviary", date_title)
+    hrefs: dict[str, str] = {}
+    expected_titles = [title for title, _ in ENGLISH_PRAYERS]
+    for link in index_soup.select(".prayers-grid a.prayers-grid-item"):
+        heading = link.find("h3")
+        href = link.get("href")
+        name = heading.get_text(" ", strip=True) if heading else ""
+        if name in expected_titles and href:
+            hrefs[name] = urljoin(DIVINE_OFFICE_URL, href)
+    if set(hrefs) != set(expected_titles):
+        raise ValueError(f"Divine Office prayer menu mismatch: {sorted(hrefs)}")
 
     prayers: list[Prayer] = []
-    for title, slug, source_key in ENGLISH_PRAYERS:
-        source = ibreviary_request(session, f"{IBREVIARY_URL}?s={source_key}")
-        prayers.append(parse_ibreviary_prayer(source, title, slug))
+    date_title = ""
+    day_title = ""
+    for title, slug in ENGLISH_PRAYERS:
+        source = divineoffice_request(session, hrefs[title])
+        source_soup = BeautifulSoup(source, "lxml")
+        if not date_title:
+            date_node = source_soup.select_one(".section-intro.is-prayer .mobile-prayer-date")
+            heading_node = source_soup.select_one(".section-intro.is-prayer .intro-title")
+            date_title = date_node.get_text(" ", strip=True) if date_node else date.strftime("%B %-d")
+            heading = heading_node.get_text(" ", strip=True) if heading_node else ""
+            prefix = f"{title} for "
+            day_title = heading[len(prefix) :] if heading.startswith(prefix) else heading
+        prayers.append(parse_divineoffice_prayer(source, title, slug))
+    liturgical_day = LiturgicalDay(day_title or "Liturgy of the Hours", "", "Divine Office", date_title)
     return EnglishDaySite(date, prayers, liturgical_day)
 
 
@@ -2760,7 +2774,7 @@ def english_index_inner(
 ) -> str:
     items = "".join(
         f'<li><a href="{slug}.html">{html.escape(title)}</a></li>'
-        for title, slug, _ in ENGLISH_PRAYERS
+        for title, slug in ENGLISH_PRAYERS
     )
     return clean_output_html(f"""
 <h1>English Breviary</h1>
@@ -2768,7 +2782,7 @@ def english_index_inner(
 {liturgical_day_html(site.liturgical_day)}
 {english_date_nav_html(site.date, available_dates, from_dir)}
 <section class="home-list"><ul>{items}</ul></section>
-<p class="kindle-note">For personal reading on Kindle · Source: iBreviary.</p>
+<p class="kindle-note">For personal reading on Kindle · Source: Divine Office.</p>
 """)
 
 
@@ -2789,7 +2803,6 @@ def english_prayer_inner(
         else f'<p class="updated">{html.escape(prayer.title)} {page_index}/{page_count}</p>'
     )
     return clean_output_html(f"""
-{nav}
 {title}
 {metadata}
 {page_body}
@@ -2964,7 +2977,7 @@ def english_encrypted_shell(
 
 def encrypt_english_pages(pages: list[dict[str, str]], passcode: str) -> dict[str, dict]:
     environment = os.environ.copy()
-    environment[IBREVIARY_PASSCODE_ENV] = passcode
+    environment[ENGLISH_BREVIARY_PASSCODE_ENV] = passcode
     result = subprocess.run(
         ["node", str(ENCRYPT_HELPER)],
         input=json.dumps({"pages": pages}),
@@ -3037,7 +3050,7 @@ def write_english_breviary(day_sites: list[EnglishDaySite], passcode: str) -> No
             )
 
         prayer_by_slug = {prayer.slug: prayer for prayer in site.prayers}
-        ordered = [prayer_by_slug[slug] for _, slug, _ in ENGLISH_PRAYERS]
+        ordered = [prayer_by_slug[slug] for _, slug in ENGLISH_PRAYERS]
         for prayer_index, prayer in enumerate(ordered):
             pages = paginated[date_name][prayer.slug]
             for page_index, page_body in enumerate(pages, start=1):
@@ -3110,7 +3123,7 @@ def write_english_breviary(day_sites: list[EnglishDaySite], passcode: str) -> No
 
 def build_english_breviary(run_date: datetime, passcode: str) -> None:
     if not re.fullmatch(r"\d{6}", passcode):
-        raise ValueError(f"{IBREVIARY_PASSCODE_ENV} must contain exactly six digits")
+        raise ValueError(f"{ENGLISH_BREVIARY_PASSCODE_ENV} must contain exactly six digits")
     session = requests.Session()
     sites = [
         fetch_english_day(session, date)
@@ -3967,9 +3980,9 @@ def main() -> int:
             write_breviary_snapshot()
             return 0
         if args.english_only:
-            passcode = os.environ.get(IBREVIARY_PASSCODE_ENV, "")
+            passcode = os.environ.get(ENGLISH_BREVIARY_PASSCODE_ENV, "")
             if not passcode:
-                raise ValueError(f"{IBREVIARY_PASSCODE_ENV} is required for --english-only")
+                raise ValueError(f"{ENGLISH_BREVIARY_PASSCODE_ENV} is required for --english-only")
             SITE_DIR.mkdir(parents=True, exist_ok=True)
             write_breviary_stylesheet()
             build_english_breviary(datetime.now(VN_TZ), passcode)
@@ -4007,7 +4020,7 @@ def main() -> int:
                 raise ValueError("Parsed prayers do not match expected fixed list")
             day_sites = [DaySite(run_date, prayers, liturgical_day, debug_lines)]
         write_site(day_sites)
-        passcode = os.environ.get(IBREVIARY_PASSCODE_ENV, "")
+        passcode = os.environ.get(ENGLISH_BREVIARY_PASSCODE_ENV, "")
         if passcode:
             try:
                 build_english_breviary(run_date, passcode)
@@ -4018,7 +4031,7 @@ def main() -> int:
         else:
             logging.warning(
                 "%s is not configured; preserving the last committed English Breviary",
-                IBREVIARY_PASSCODE_ENV,
+                ENGLISH_BREVIARY_PASSCODE_ENV,
             )
         append_debug([line for site in day_sites for line in site.debug_lines])
         logging.info("Generated %d day(s) of prayer pages in %s", len(day_sites), SITE_DIR.relative_to(ROOT))

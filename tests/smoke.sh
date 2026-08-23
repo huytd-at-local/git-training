@@ -65,6 +65,8 @@ grep -q 'LOCKED: Chưa có khóa phiên' site/debug/encrypted-breviary-session-2
 
 if test -d site/breviary/en; then
   test -f site/breviary/en/index.html
+  grep -q 'DIVINE_OFFICE_URL' scripts/fetch.py
+  ! grep -qi 'ibreviary' scripts/fetch.py
   grep -q 'breviary-en-key-v1' site/breviary/en/index.html
   grep -q 'mode.*ccm' site/breviary/en/index.html
   grep -q 'var CIPHERTEXT = "{\\"iv\\"' site/breviary/en/index.html
@@ -146,15 +148,41 @@ import unicodedata
 from pathlib import Path
 from bs4 import BeautifulSoup
 from scripts.fetch import (
+    ENGLISH_PRAYERS,
     PAGE_TARGET_UNITS,
     block_units,
     debug_production_verse,
     debug_prose,
     debug_verse,
+    english_prayer_inner,
     html_blocks,
     page_units,
     text_units,
 )
+
+expected_english_prayers = [
+    "Invitatory",
+    "Office of Readings",
+    "Morning Prayer",
+    "Midmorning Prayer",
+    "Midday Prayer",
+    "Midafternoon Prayer",
+    "Evening Prayer",
+    "Night Prayer",
+]
+if [title for title, _ in ENGLISH_PRAYERS] != expected_english_prayers:
+    raise SystemExit("English Breviary menu no longer matches the Divine Office hours")
+english_inner = english_prayer_inner(
+    type("Prayer", (), {"title": "Morning Prayer"})(),
+    None,
+    "<p>Prayer text.</p>",
+    1,
+    1,
+    '<nav class="page-nav paged-nav breviary-nav">nav</nav>',
+    "now",
+)
+if english_inner.count('class="page-nav paged-nav breviary-nav"') != 1:
+    raise SystemExit("English prayer page must have only the bottom Breviary navigation")
 
 if text_units(debug_prose(115)) != 11:
     raise SystemExit("Kindle prose calibration drifted from the measured 48-character line")
