@@ -11,8 +11,8 @@ if (!passcode) {
 }
 
 const request = JSON.parse(fs.readFileSync(0, "utf8"));
-if (!request.pages || !request.pages.length || request.pages[0].id !== "root-index") {
-  throw new Error("The root unlock page must be encrypted first");
+if (!request.pages || !request.pages.length || !request.pages[0].id) {
+  throw new Error("The unlock page must be encrypted first");
 }
 
 const params = { iter: 2000, ks: 256, ts: 128, mode: "ccm", cipher: "aes" };

@@ -144,20 +144,36 @@ fi
 
 "$PYTHON_BIN" - <<'PY'
 import re
+import tempfile
 import unicodedata
+from datetime import datetime
 from pathlib import Path
 from bs4 import BeautifulSoup
+import scripts.fetch as fetch_module
 from scripts.fetch import (
     ENGLISH_PRAYERS,
+    GEMINI_GENERATE_CONTENT_URL,
+    LEARNER_FIRST_PAGE_TARGET_UNITS,
+    LEARNER_PAGE_TARGET_UNITS,
     PAGE_TARGET_UNITS,
+    Prayer,
     block_units,
     debug_production_verse,
     debug_prose,
     debug_verse,
     english_prayer_inner,
     html_blocks,
+    learner_html_blocks,
+    learner_page_units,
+    learner_prayer_body,
     page_units,
+    paginate_learner_html,
     text_units,
+    EnglishDaySite,
+    LiturgicalDay,
+    LearnerLanguage,
+    write_english_breviary,
+    write_english_learner,
 )
 
 expected_english_prayers = [
@@ -183,6 +199,90 @@ english_inner = english_prayer_inner(
 )
 if english_inner.count('class="page-nav paged-nav breviary-nav"') != 1:
     raise SystemExit("English prayer page must have only the bottom Breviary navigation")
+
+class FakeGeminiResponse:
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return {"candidates": [{"content": {"parts": [{"text": '{"items": []}'}]}}]}
+
+gemini_call = {}
+original_post = fetch_module.requests.post
+try:
+    def fake_gemini_post(url, **kwargs):
+        gemini_call["url"] = url
+        gemini_call.update(kwargs)
+        return FakeGeminiResponse()
+
+    fetch_module.requests.post = fake_gemini_post
+    response = LearnerLanguage("test-key", "gemini-test").request_json(
+        "smoke", {"type": "object", "properties": {"items": {"type": "array"}}}, "Use JSON.", {"items": []}
+    )
+finally:
+    fetch_module.requests.post = original_post
+if response != {"items": []}:
+    raise SystemExit("Gemini structured response parsing failed")
+if gemini_call["url"] != GEMINI_GENERATE_CONTENT_URL.format(model="gemini-test"):
+    raise SystemExit("Learner request does not use the Gemini generateContent endpoint")
+if gemini_call["headers"].get("x-goog-api-key") != "test-key":
+    raise SystemExit("Learner request does not send the Gemini API key header")
+config = gemini_call["json"].get("generationConfig", {})
+if config.get("responseMimeType") != "application/json" or "responseJsonSchema" not in config:
+    raise SystemExit("Learner request does not enforce Gemini structured JSON output")
+
+class FakeLearnerLanguage:
+    def pronunciations(self, texts):
+        return {text: "PHIÊN-ÂM MẪU." for text in texts}
+
+    def glossary(self, prayer_title, source_text):
+        return [
+            {"term": term, "definition": "a simple word in this prayer"}
+            for term in ("God", "assistance", "Lord", "haste", "Father", "Spirit")
+        ]
+
+learner_body = learner_prayer_body(
+    Prayer(
+        "Morning Prayer",
+        "morning-prayer",
+        "<div class=\"stanza\"><div>God, come to my assistance.</div>"
+        "<div>Lord, make haste to help me.</div></div>"
+        "<h2>Hymn</h2><p>Father and Spirit help us in this prayer.</p>",
+    ),
+    FakeLearnerLanguage(),
+)
+if learner_body.count("learner-row") < 8:
+    raise SystemExit("Learner mode must pair each source line and glossary explanation")
+if "Words in this prayer" not in learner_body or "PHIÊN-ÂM MẪU." not in learner_body:
+    raise SystemExit("Learner mode is missing glossary pronunciation output")
+learner_pages = paginate_learner_html(learner_body)
+for number, learner_page in enumerate(learner_pages):
+    limit = LEARNER_FIRST_PAGE_TARGET_UNITS if number == 0 else LEARNER_PAGE_TARGET_UNITS
+    if learner_page_units(learner_html_blocks(learner_page)) > limit:
+        raise SystemExit("Learner page exceeds its independent Kindle fill budget")
+
+test_day = EnglishDaySite(
+    datetime(2026, 8, 23),
+    [Prayer(title, slug, "<p>God, come to my assistance.</p>") for title, slug in ENGLISH_PRAYERS],
+    LiturgicalDay("Sunday", "", "test", "August 23"),
+)
+with tempfile.TemporaryDirectory() as temporary_dir:
+    original_site_dir = fetch_module.SITE_DIR
+    fetch_module.SITE_DIR = Path(temporary_dir) / "site"
+    try:
+        write_english_breviary([test_day], "123456")
+        learner_bodies = {
+            "2026-08-23": {slug: learner_body for _, slug in ENGLISH_PRAYERS}
+        }
+        write_english_learner([test_day], "123456", learner_bodies)
+        learner_index = fetch_module.SITE_DIR / "breviary" / "en" / "learner" / "index.html"
+        if not learner_index.is_file():
+            raise SystemExit("Learner writer did not create its encrypted root index")
+        write_english_breviary([test_day], "123456", preserve_learner=True)
+        if not learner_index.is_file():
+            raise SystemExit("Normal English rebuild removed the learner edition without an API key")
+    finally:
+        fetch_module.SITE_DIR = original_site_dir
 
 if text_units(debug_prose(115)) != 11:
     raise SystemExit("Kindle prose calibration drifted from the measured 48-character line")

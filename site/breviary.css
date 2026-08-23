@@ -755,3 +755,61 @@ code {
       font-variant: small-caps;
       letter-spacing: 0.035em;
     }
+
+    /* English learner mode: CSS 2.1 table layout is reliable on Kindle's
+       legacy WebKit and keeps the two columns in lockstep without scripts. */
+    .learner-page main {
+      max-width: none;
+    }
+
+    .learner-page .learner-note {
+      margin: 0 0 18px;
+      font-size: 26px;
+      text-align: center;
+    }
+
+    .learner-page .learner-row {
+      display: table;
+      width: 100%;
+      table-layout: fixed;
+      margin: 0 0 12px;
+      border-bottom: 1px solid #999;
+    }
+
+    .learner-page .learner-english,
+    .learner-page .learner-pronunciation {
+      display: table-cell;
+      box-sizing: border-box;
+      vertical-align: top;
+      font-size: 28px;
+      line-height: 1.31;
+      overflow-wrap: break-word;
+      word-wrap: break-word;
+    }
+
+    .learner-page .learner-english {
+      width: 56%;
+      padding: 5px 10px 7px 0;
+    }
+
+    .learner-page .learner-pronunciation {
+      width: 44%;
+      padding: 5px 0 7px 10px;
+      border-left: 1px solid #8b0000;
+      color: #333;
+    }
+
+    .learner-page .learner-english p,
+    .learner-page .learner-pronunciation p {
+      margin: 0;
+    }
+
+    .learner-page .learner-glossary {
+      margin-top: 22px;
+      padding-top: 4px;
+      border-top: 1px solid #777;
+    }
+
+    .learner-page .learner-glossary h2 {
+      margin-top: 14px;
+    }

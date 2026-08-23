@@ -30,10 +30,20 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Restore English learner language cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/breviary-learner-language-v2.json
+          key: breviary-learner-v2-${{ github.run_id }}
+          restore-keys: |
+            breviary-learner-v2-
+
       - name: Generate static site
         run: python scripts/fetch.py
         env:
           BREVIARY_EN_PASSCODE: ${{ secrets.BREVIARY_EN_PASSCODE }}
+          BREVIARY_LEARNER_GEMINI_API_KEY: ${{ secrets.BREVIARY_LEARNER_GEMINI_API_KEY }}
+          BREVIARY_LEARNER_GEMINI_MODEL: gemini-2.5-flash-lite
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4

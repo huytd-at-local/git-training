@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html
 import json
 import logging
@@ -25,6 +26,10 @@ from zoneinfo import ZoneInfo
 SOURCE_URL = "https://ktcgkpv.org/readings/prayer"
 DIVINE_OFFICE_URL = "https://divineoffice.org/"
 ENGLISH_BREVIARY_PASSCODE_ENV = "BREVIARY_EN_PASSCODE"
+LEARNER_GEMINI_API_KEY_ENV = "BREVIARY_LEARNER_GEMINI_API_KEY"
+LEARNER_GEMINI_MODEL_ENV = "BREVIARY_LEARNER_GEMINI_MODEL"
+LEARNER_GEMINI_DEFAULT_MODEL = "gemini-2.5-flash-lite"
+GEMINI_GENERATE_CONTENT_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 TIMEOUT_SECONDS = 30
 ROOT = Path(__file__).resolve().parents[1]
 SITE_DIR = ROOT / "site"
@@ -86,6 +91,7 @@ ENGLISH_PRAYERS = [
     ("Night Prayer", "night-prayer"),
 ]
 ENGLISH_SESSION_KEY = "breviary-en-key-v1"
+ENGLISH_LEARNER_SESSION_KEY = "breviary-en-learner-key-v1"
 ENCRYPT_HELPER = ROOT / "scripts" / "encrypt_breviary.js"
 
 BREVIARY_CSS = """
@@ -243,8 +249,66 @@ BREVIARY_CSS = """
       font-variant: small-caps;
       letter-spacing: 0.035em;
     }
+
+    /* English learner mode: CSS 2.1 table layout is reliable on Kindle's
+       legacy WebKit and keeps the two columns in lockstep without scripts. */
+    .learner-page main {
+      max-width: none;
+    }
+
+    .learner-page .learner-note {
+      margin: 0 0 18px;
+      font-size: 26px;
+      text-align: center;
+    }
+
+    .learner-page .learner-row {
+      display: table;
+      width: 100%;
+      table-layout: fixed;
+      margin: 0 0 12px;
+      border-bottom: 1px solid #999;
+    }
+
+    .learner-page .learner-english,
+    .learner-page .learner-pronunciation {
+      display: table-cell;
+      box-sizing: border-box;
+      vertical-align: top;
+      font-size: 28px;
+      line-height: 1.31;
+      overflow-wrap: break-word;
+      word-wrap: break-word;
+    }
+
+    .learner-page .learner-english {
+      width: 56%;
+      padding: 5px 10px 7px 0;
+    }
+
+    .learner-page .learner-pronunciation {
+      width: 44%;
+      padding: 5px 0 7px 10px;
+      border-left: 1px solid #8b0000;
+      color: #333;
+    }
+
+    .learner-page .learner-english p,
+    .learner-page .learner-pronunciation p {
+      margin: 0;
+    }
+
+    .learner-page .learner-glossary {
+      margin-top: 22px;
+      padding-top: 4px;
+      border-top: 1px solid #777;
+    }
+
+    .learner-page .learner-glossary h2 {
+      margin-top: 14px;
+    }
 """
-BREVIARY_CSS_VERSION = "2"
+BREVIARY_CSS_VERSION = "3"
 
 PAGE_TARGET_UNITS = 17.4
 FIRST_PAGE_TARGET_UNITS = 14.4
@@ -265,6 +329,20 @@ MIN_UNITS_BEFORE_HEADING_BREAK = 7
 MIN_PAGE_UNITS = 12
 SPLIT_PARAGRAPH_MIN_LINES = 4
 SPLIT_PARAGRAPH_CHUNK_LINES = 2
+
+# The learner mode is deliberately calibrated independently: a paired row has
+# two narrow reading columns and its height is the taller column, not the sum.
+# These are conservative initial values and will be tuned from Paperwhite 3
+# captures without changing the established Vietnamese pagination constants.
+LEARNER_PAGE_TARGET_UNITS = 21.0
+LEARNER_FIRST_PAGE_TARGET_UNITS = 17.0
+LEARNER_MIN_PAGE_UNITS = 14.0
+LEARNER_LEFT_CHARS_PER_LINE = 18
+LEARNER_RIGHT_CHARS_PER_LINE = 16
+LEARNER_ROW_SPACING_UNITS = 0.36
+LEARNER_MAX_FRAGMENT_CHARS = 92
+LEARNER_GUIDANCE_BATCH_SIZE = 30
+LEARNER_CACHE_FILE = CACHE_DIR / "breviary-learner-language-v2.json"
 
 LABEL_PATTERNS = [
     r"^ĐC\b",
@@ -685,6 +763,218 @@ def clean_soup(source: str) -> BeautifulSoup:
 
 def fragment_soup(fragment: str | None) -> BeautifulSoup:
     return BeautifulSoup(f"<div>{fragment or ''}</div>", "lxml")
+
+
+class LearnerLanguageError(RuntimeError):
+    """Raised when the build-time language enrichment is unavailable or invalid."""
+
+
+def learner_cache_key(value: str) -> str:
+    normalized = re.sub(r"\s+", " ", value).strip().casefold()
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def load_learner_language_cache() -> dict[str, dict]:
+    empty = {"pronunciations": {}, "glossaries": {}}
+    if not LEARNER_CACHE_FILE.exists():
+        return empty
+    try:
+        loaded = json.loads(LEARNER_CACHE_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        logging.warning("Ignoring invalid learner language cache: %s", error)
+        return empty
+    if not isinstance(loaded, dict):
+        return empty
+    return {
+        "pronunciations": loaded.get("pronunciations", {}) if isinstance(loaded.get("pronunciations"), dict) else {},
+        "glossaries": loaded.get("glossaries", {}) if isinstance(loaded.get("glossaries"), dict) else {},
+    }
+
+
+def gemini_response_text(response: dict) -> str:
+    candidates = response.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        raise LearnerLanguageError("Gemini response did not contain a candidate")
+    content = candidates[0].get("content") if isinstance(candidates[0], dict) else None
+    parts = content.get("parts") if isinstance(content, dict) else None
+    if not isinstance(parts, list):
+        raise LearnerLanguageError("Gemini response did not contain text parts")
+    value = "".join(
+        item.get("text", "") for item in parts if isinstance(item, dict) and isinstance(item.get("text"), str)
+    ).strip()
+    if not value:
+        raise LearnerLanguageError("Gemini response did not contain text output")
+    return value
+
+
+class LearnerLanguage:
+    """Build-time British pronunciation and beginner glossary generator.
+
+    Its cache stays under .cache so source text and model output never become a
+    separate public, unencrypted website artifact.
+    """
+
+    def __init__(self, api_key: str, model: str | None = None) -> None:
+        if not api_key:
+            raise LearnerLanguageError(f"{LEARNER_GEMINI_API_KEY_ENV} is required")
+        self.api_key = api_key
+        self.model = model or os.environ.get(LEARNER_GEMINI_MODEL_ENV, LEARNER_GEMINI_DEFAULT_MODEL)
+        self.cache = load_learner_language_cache()
+        self.changed = False
+
+    def save(self) -> None:
+        if not self.changed:
+            return
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        LEARNER_CACHE_FILE.write_text(
+            json.dumps(self.cache, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+    def request_json(self, name: str, schema: dict, instructions: str, payload: dict) -> dict:
+        response = requests.post(
+            GEMINI_GENERATE_CONTENT_URL.format(model=self.model),
+            headers={
+                "Content-Type": "application/json",
+                "x-goog-api-key": self.api_key,
+            },
+            json={
+                "systemInstruction": {"parts": [{"text": instructions}]},
+                "contents": [{"parts": [{"text": json.dumps(payload, ensure_ascii=False)}]}],
+                "generationConfig": {
+                    "temperature": 0.2,
+                    "responseMimeType": "application/json",
+                    "responseJsonSchema": schema,
+                },
+            },
+            timeout=TIMEOUT_SECONDS * 3,
+        )
+        response.raise_for_status()
+        try:
+            return json.loads(gemini_response_text(response.json()))
+        except (ValueError, json.JSONDecodeError) as error:
+            raise LearnerLanguageError(f"Invalid Gemini {name} response: {error}") from error
+
+    def pronunciations(self, texts: list[str]) -> dict[str, str]:
+        unique = list(dict.fromkeys(text for text in texts if text.strip()))
+        result: dict[str, str] = {}
+        missing: list[str] = []
+        for text in unique:
+            cached = self.cache["pronunciations"].get(learner_cache_key(text))
+            if isinstance(cached, str) and cached.strip():
+                result[text] = cached.strip()
+            else:
+                missing.append(text)
+
+        schema = {
+            "type": "object",
+            "required": ["items"],
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["id", "guide"],
+                        "properties": {
+                            "id": {"type": "string"},
+                            "guide": {"type": "string"},
+                        },
+                    },
+                }
+            },
+        }
+        instructions = (
+            "Create a Vietnamese-style pronunciation guide for each English item. "
+            "Aim for natural modern British pronunciation. Use easy Vietnamese-like spelling, "
+            "CAPITAL letters for stressed syllables, and show linking or reduced sounds only "
+            "when helpful. Do not use IPA, grammar notes, translations, labels, markdown, or "
+            "any text other than the pronunciation guide. Keep punctuation natural and concise."
+        )
+        for offset in range(0, len(missing), LEARNER_GUIDANCE_BATCH_SIZE):
+            batch = missing[offset : offset + LEARNER_GUIDANCE_BATCH_SIZE]
+            items = [{"id": str(index), "text": text} for index, text in enumerate(batch)]
+            payload = self.request_json("pronunciation_guides", schema, instructions, {"items": items})
+            guides = payload.get("items")
+            if not isinstance(guides, list):
+                raise LearnerLanguageError("Pronunciation response omitted items")
+            by_id = {item.get("id"): item.get("guide") for item in guides if isinstance(item, dict)}
+            for item in items:
+                guide = by_id.get(item["id"])
+                if not isinstance(guide, str) or not guide.strip() or len(guide) > 500:
+                    raise LearnerLanguageError(f"Pronunciation response is invalid for {item['text']!r}")
+                result[item["text"]] = guide.strip()
+                self.cache["pronunciations"][learner_cache_key(item["text"])] = guide.strip()
+                self.changed = True
+        return result
+
+    def glossary(self, prayer_title: str, source_text: str) -> list[dict[str, str]]:
+        cache_key = learner_cache_key(f"{prayer_title}\n{source_text}")
+        cached = self.cache["glossaries"].get(cache_key)
+        if isinstance(cached, list) and all(isinstance(item, dict) for item in cached):
+            return cached
+        schema = {
+            "type": "object",
+            "required": ["items"],
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "minItems": 6,
+                    "maxItems": 12,
+                    "items": {
+                        "type": "object",
+                        "required": ["term", "definition"],
+                        "properties": {
+                            "term": {"type": "string"},
+                            "definition": {"type": "string"},
+                        },
+                    },
+                }
+            },
+        }
+        instructions = (
+            "Select 6 to 12 English words or short phrases from the supplied prayer that could "
+            "confuse a learner of English after about six months of study. Copy every selected "
+            "term exactly from the prayer. For each, write one very simple English definition, "
+            "maximum 12 words. Do not translate, do not use markdown, and do not add terms that "
+            "do not appear in the prayer."
+        )
+        payload = self.request_json(
+            "beginner_prayer_glossary",
+            schema,
+            instructions,
+            {"prayer_title": prayer_title, "prayer_text": source_text},
+        )
+        items = payload.get("items")
+        if not isinstance(items, list):
+            raise LearnerLanguageError("Glossary response omitted items")
+        validated: list[dict[str, str]] = []
+        source_key = re.sub(r"\s+", " ", source_text).casefold()
+        seen: set[str] = set()
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            term = item.get("term")
+            definition = item.get("definition")
+            if not isinstance(term, str) or not isinstance(definition, str):
+                continue
+            term = re.sub(r"\s+", " ", term).strip()
+            definition = re.sub(r"\s+", " ", definition).strip()
+            term_key = term.casefold()
+            if (
+                not term
+                or not definition
+                or len(definition.split()) > 12
+                or term_key in seen
+                or term_key not in source_key
+            ):
+                continue
+            seen.add(term_key)
+            validated.append({"term": term, "definition": definition})
+        if len(validated) < 6:
+            raise LearnerLanguageError("Glossary response did not provide six valid source terms")
+        self.cache["glossaries"][cache_key] = validated
+        self.changed = True
+        return validated
 
 
 def set_inner_html(tag: Tag, fragment: str | None) -> None:
@@ -2455,6 +2745,216 @@ def paginate_html(fragment: str) -> list[str]:
     return ["\n".join(page) for page in pages]
 
 
+def split_learner_fragments(value: str) -> list[str]:
+    """Split source prose into paired, Kindle-sized reading units.
+
+    A unit normally is one sentence. Very long liturgical sentences are split
+    at a natural clause or word boundary so one two-column row can never force
+    the fixed page navigation out of the Paperwhite viewport.
+    """
+    text = re.sub(r"\s+", " ", value).strip()
+    if not text:
+        return []
+    sentences: list[str] = []
+    start = 0
+    for match in re.finditer(r"[.!?]+(?:[\"”’)]*)", text):
+        end = match.end()
+        following = text[end:].lstrip()
+        before = text[start:end]
+        abbreviation = re.search(r"\b(?:St|Mr|Mrs|Ms|Dr|Fr|No|R|V)\.$", before)
+        if abbreviation or not following or not re.match(r"[A-Z“]", following):
+            continue
+        sentences.append(text[start:end].strip())
+        start = end
+    if text[start:].strip():
+        sentences.append(text[start:].strip())
+    if not sentences:
+        sentences = [text]
+
+    fragments: list[str] = []
+    for sentence in sentences:
+        remaining = sentence
+        while len(remaining) > LEARNER_MAX_FRAGMENT_CHARS:
+            cut = max(
+                remaining.rfind(marker, 0, LEARNER_MAX_FRAGMENT_CHARS + 1)
+                for marker in ("; ", ": ", ", ", " — ", " ")
+            )
+            if cut <= 0:
+                break
+            fragment = remaining[:cut].rstrip(" ,;:")
+            if fragment:
+                fragments.append(fragment)
+            remaining = remaining[cut:].lstrip(" ,;:")
+        if remaining:
+            fragments.append(remaining)
+    return fragments
+
+
+def learner_left_html(text: str) -> str:
+    escaped = html.escape(text)
+    if escaped.startswith("—"):
+        return '<span class="rubric">—</span>' + escaped[1:]
+    return escaped
+
+
+def learner_row_html(english_text: str, pronunciation: str, *, glossary: bool = False) -> str:
+    classes = "learner-row learner-glossary-row" if glossary else "learner-row"
+    return (
+        f'<section class="{classes}">'
+        f'<div class="learner-english"><p>{learner_left_html(english_text)}</p></div>'
+        f'<div class="learner-pronunciation" lang="vi"><p>{html.escape(pronunciation)}</p></div>'
+        "</section>"
+    )
+
+
+def learner_source_units(body_html: str) -> list[tuple[str, str]]:
+    """Return ('heading' | 'sentence', HTML/text) units from Divine Office HTML."""
+    units: list[tuple[str, str]] = []
+    for block in html_blocks(body_html):
+        soup = fragment_soup(block)
+        wrapper = soup.find("div")
+        if wrapper is None:
+            continue
+        node = next((child for child in wrapper.children if isinstance(child, Tag)), None)
+        if node is None:
+            continue
+        if node.name in {"h2", "h3"}:
+            units.append(("heading", str(node)))
+            continue
+        lines = node.select(":scope > div") if "stanza" in set(node.get("class", [])) else [node]
+        for line in lines:
+            line_text = line.get_text(" ", strip=True)
+            units.extend(("sentence", fragment) for fragment in split_learner_fragments(line_text))
+    return units
+
+
+def learner_prayer_body(prayer: Prayer, language: LearnerLanguage) -> str:
+    units = learner_source_units(prayer.body_html)
+    sentences = [value for kind, value in units if kind == "sentence"]
+    pronunciations = language.pronunciations(sentences)
+    rendered: list[str] = []
+    for kind, value in units:
+        if kind == "heading":
+            rendered.append(value)
+        else:
+            rendered.append(learner_row_html(value, pronunciations[value]))
+
+    source_text = " ".join(sentences)
+    glossary = language.glossary(prayer.title, source_text)
+    glossary_left = [f"{item['term']} — {item['definition']}" for item in glossary]
+    glossary_guides = language.pronunciations(glossary_left)
+    rendered.append('<section class="learner-glossary"><h2>Words in this prayer</h2>')
+    rendered.extend(
+        learner_row_html(left, glossary_guides[left], glossary=True)
+        for left in glossary_left
+    )
+    rendered.append("</section>")
+    return "\n".join(rendered)
+
+
+def learner_html_blocks(fragment: str) -> list[str]:
+    soup = fragment_soup(fragment)
+    wrapper = soup.find("div")
+    if not wrapper:
+        return []
+    blocks: list[str] = []
+    for child in wrapper.children:
+        if isinstance(child, NavigableString):
+            continue
+        if not isinstance(child, Tag):
+            continue
+        if "learner-glossary" in set(child.get("class", [])):
+            for glossary_child in child.children:
+                if isinstance(glossary_child, Tag):
+                    blocks.append(str(glossary_child))
+            continue
+        blocks.append(str(child))
+    return blocks
+
+
+def learner_text_units(text: str, chars_per_line: int) -> float:
+    normalized = re.sub(r"\s+", " ", text).strip()
+    return float(max(1, (len(normalized) + chars_per_line - 1) // chars_per_line))
+
+
+def learner_block_units(block_html: str) -> float:
+    soup = fragment_soup(block_html)
+    row = soup.select_one(".learner-row")
+    if row:
+        left = row.select_one(".learner-english")
+        right = row.select_one(".learner-pronunciation")
+        left_text = left.get_text(" ", strip=True) if left else ""
+        right_text = right.get_text(" ", strip=True) if right else ""
+        return max(
+            learner_text_units(left_text, LEARNER_LEFT_CHARS_PER_LINE),
+            learner_text_units(right_text, LEARNER_RIGHT_CHARS_PER_LINE),
+        ) + LEARNER_ROW_SPACING_UNITS
+    heading = soup.find(["h2", "h3"])
+    if heading:
+        return 1.8 + learner_text_units(heading.get_text(" ", strip=True), LEARNER_LEFT_CHARS_PER_LINE)
+    return block_units(block_html)
+
+
+def learner_page_units(blocks: list[str]) -> float:
+    return sum(learner_block_units(block) for block in blocks)
+
+
+def rebalance_learner_pages(pages: list[list[str]]) -> list[list[str]]:
+    index = 1
+    while index < len(pages):
+        current_units = learner_page_units(pages[index])
+        if index < len(pages) - 1 and pages[index + 1]:
+            candidate = pages[index + 1][0]
+            if current_units + learner_block_units(candidate) <= LEARNER_PAGE_TARGET_UNITS:
+                pages[index].append(pages[index + 1].pop(0))
+                if not pages[index + 1]:
+                    del pages[index + 1]
+                continue
+        if current_units >= LEARNER_MIN_PAGE_UNITS:
+            index += 1
+            continue
+        if index > 0 and pages[index - 1]:
+            candidate = pages[index - 1][-1]
+            remaining = learner_page_units(pages[index - 1][:-1])
+            if (
+                current_units + learner_block_units(candidate) <= LEARNER_PAGE_TARGET_UNITS
+                and remaining >= LEARNER_MIN_PAGE_UNITS
+            ):
+                pages[index].insert(0, pages[index - 1].pop())
+                continue
+        index += 1
+    return [page for page in pages if page]
+
+
+def paginate_learner_html(fragment: str) -> list[str]:
+    blocks = learner_html_blocks(fragment)
+    if not blocks:
+        return [fragment]
+    pages: list[list[str]] = []
+    current: list[str] = []
+    current_units = 0.0
+    for block in blocks:
+        units = learner_block_units(block)
+        target = LEARNER_FIRST_PAGE_TARGET_UNITS if not pages else LEARNER_PAGE_TARGET_UNITS
+        if units > target:
+            raise LearnerLanguageError("A learner row exceeds the Kindle page budget")
+        if current and is_heading_block(block) and current_units >= MIN_UNITS_BEFORE_HEADING_BREAK:
+            pages.append(current)
+            current = []
+            current_units = 0.0
+            target = LEARNER_PAGE_TARGET_UNITS
+        if current and current_units + units > target:
+            pages.append(current)
+            current = []
+            current_units = 0.0
+        current.append(block)
+        current_units += units
+    if current:
+        pages.append(current)
+    pages = rebalance_learner_pages(pages)
+    return ["\n".join(page) for page in pages]
+
+
 def page_nav_html(
     previous_href: str | None,
     next_href: str | None,
@@ -2788,10 +3288,16 @@ def english_index_inner(
     available_dates: list[datetime],
     updated: str,
     from_dir: str,
+    learner_href: str | None = None,
 ) -> str:
     items = "".join(
         f'<li><a href="{slug}.html">{html.escape(title)}</a></li>'
         for title, slug in ENGLISH_PRAYERS
+    )
+    learner_mode_html = (
+        f'<p class="mode-switch"><a href="{html.escape(learner_href, quote=True)}">Learner mode</a></p>'
+        if learner_href
+        else ""
     )
     return clean_output_html(f"""
 <h1>English Breviary</h1>
@@ -2800,6 +3306,29 @@ def english_index_inner(
 {english_date_nav_html(site.date, available_dates, from_dir)}
 <section class="home-list"><ul>{items}</ul></section>
 <p class="kindle-note">For personal reading on Kindle · Source: Divine Office.</p>
+{learner_mode_html}
+""")
+
+
+def learner_index_inner(
+    site: EnglishDaySite,
+    available_dates: list[datetime],
+    updated: str,
+    from_dir: str,
+) -> str:
+    items = "".join(
+        f'<li><a href="{slug}.html">{html.escape(title)}</a></li>'
+        for title, slug in ENGLISH_PRAYERS
+    )
+    reading_href = "../index.html" if not from_dir else "../../index.html"
+    return clean_output_html(f"""
+<h1>English Breviary</h1>
+<p class="updated">Updated: {html.escape(updated)}</p>
+{liturgical_day_html(site.liturgical_day)}
+{english_date_nav_html(site.date, available_dates, from_dir)}
+<section class="home-list"><ul>{items}</ul></section>
+<p class="kindle-note">English with Vietnamese-style pronunciation · Source: Divine Office.</p>
+<p class="mode-switch"><a href="{reading_href}">Reading mode</a></p>
 """)
 
 
@@ -2827,7 +3356,31 @@ def english_prayer_inner(
 """)
 
 
-def english_unlock_script(ciphertext: dict) -> str:
+def learner_prayer_inner(
+    prayer: Prayer,
+    liturgical_day: LiturgicalDay,
+    page_body: str,
+    page_index: int,
+    page_count: int,
+    nav: str,
+    updated: str,
+) -> str:
+    title = f"<h1>{html.escape(prayer.title)}</h1>" if page_index == 1 else ""
+    metadata = (
+        f'<p class="updated">Updated: {html.escape(updated)}</p>'
+        f"{liturgical_day_html(liturgical_day)}"
+        if page_index == 1
+        else f'<p class="updated">{html.escape(prayer.title)} {page_index}/{page_count}</p>'
+    )
+    return clean_output_html(f"""
+{title}
+{metadata}
+{page_body}
+{nav}
+""")
+
+
+def english_unlock_script(ciphertext: dict, session_key: str = ENGLISH_SESSION_KEY) -> str:
     # Kindle WebKit 534 has already proven reliable with SJCL's encoded JSON
     # string path on /debug.  Passing the decoded object takes a different
     # compatibility path inside sjcl.json.decrypt and can fail on that engine.
@@ -2835,7 +3388,7 @@ def english_unlock_script(ciphertext: dict) -> str:
     return f"""  <script>
   (function () {{
     var CIPHERTEXT = {payload};
-    var SESSION_KEY = {json.dumps(ENGLISH_SESSION_KEY)};
+    var SESSION_KEY = {json.dumps(session_key)};
 
     function status(message, isError) {{
       var node = document.getElementById('passcode-status');
@@ -2904,12 +3457,16 @@ def english_unlock_script(ciphertext: dict) -> str:
   </script>"""
 
 
-def english_session_script(ciphertext: dict, unlock_href: str) -> str:
+def english_session_script(
+    ciphertext: dict,
+    unlock_href: str,
+    session_key: str = ENGLISH_SESSION_KEY,
+) -> str:
     payload = json.dumps(json.dumps(ciphertext, separators=(",", ":")))
     return f"""  <script>
   (function () {{
     var CIPHERTEXT = {payload};
-    var SESSION_KEY = {json.dumps(ENGLISH_SESSION_KEY)};
+    var SESSION_KEY = {json.dumps(session_key)};
     var UNLOCK_HREF = {json.dumps(unlock_href)};
 
     function locked(message) {{
@@ -2950,6 +3507,8 @@ def english_encrypted_shell(
     unlock_page: bool,
     unlock_href: str,
     first_page: bool = False,
+    session_key: str = ENGLISH_SESSION_KEY,
+    body_class: str = "",
 ) -> str:
     sjcl_source = SJCL_PATH.read_text(encoding="utf-8").strip()
     if unlock_page:
@@ -2965,13 +3524,15 @@ def english_encrypted_shell(
             '</form><p id="passcode-status" class="passcode-status">Enter the passcode to read.</p>'
             '</section>'
         )
-        behavior = english_unlock_script(ciphertext)
+        behavior = english_unlock_script(ciphertext, session_key)
     else:
         gate = '<p id="decrypt-status" class="decrypt-status">Opening...</p>'
-        behavior = english_session_script(ciphertext, unlock_href)
-    body_class = "breviary-page breviary-encrypted"
+        behavior = english_session_script(ciphertext, unlock_href, session_key)
+    classes = "breviary-page breviary-encrypted"
     if first_page:
-        body_class += " breviary-first"
+        classes += " breviary-first"
+    if body_class:
+        classes += f" {body_class}"
     return clean_output_html(f"""<!doctype html>
 <html lang="en">
 <head>
@@ -2982,7 +3543,7 @@ def english_encrypted_shell(
   <script>{sjcl_source}</script>
 {behavior}
 </head>
-<body class="{body_class}">
+<body class="{classes}">
   <main>
     {gate}
     <div id="encrypted-content"></div>
@@ -3008,7 +3569,13 @@ def encrypt_english_pages(pages: list[dict[str, str]], passcode: str) -> dict[st
     return {page_id: json.loads(payload) for page_id, payload in encoded.items()}
 
 
-def write_english_breviary(day_sites: list[EnglishDaySite], passcode: str) -> None:
+def write_english_breviary(
+    day_sites: list[EnglishDaySite],
+    passcode: str,
+    *,
+    preserve_learner: bool = False,
+    include_learner_link: bool = False,
+) -> None:
     target_root = SITE_DIR / "breviary" / "en"
     updated = datetime.now(VN_TZ).strftime("%d/%m/%Y %H:%M Vietnam time")
     available_dates = [site.date for site in day_sites]
@@ -3049,7 +3616,13 @@ def write_english_breviary(day_sites: list[EnglishDaySite], passcode: str) -> No
         "root-index",
         target_root / "index.html",
         "../../breviary.css?v=3-encrypted-en",
-        english_index_inner(today, available_dates, updated, ""),
+        english_index_inner(
+            today,
+            available_dates,
+            updated,
+            "",
+            "learner/index.html" if include_learner_link else None,
+        ),
         unlock_page=True,
     )
 
@@ -3062,7 +3635,13 @@ def write_english_breviary(day_sites: list[EnglishDaySite], passcode: str) -> No
                 f"{date_name}-index",
                 target_dir / "index.html",
                 css_href,
-                english_index_inner(site, available_dates, updated, date_name),
+                english_index_inner(
+                    site,
+                    available_dates,
+                    updated,
+                    date_name,
+                    f"../learner/{date_name}/index.html" if include_learner_link else None,
+                ),
                 unlock_href=unlock_href,
             )
 
@@ -3132,10 +3711,171 @@ def write_english_breviary(day_sites: list[EnglishDaySite], passcode: str) -> No
             ),
             encoding="utf-8",
         )
+    learner_hold = target_root.with_name("learner.hold")
+    if learner_hold.exists():
+        shutil.rmtree(learner_hold)
+    if preserve_learner and (target_root / "learner").exists():
+        (target_root / "learner").rename(learner_hold)
     if target_root.exists():
         shutil.rmtree(target_root)
     temporary.rename(target_root)
+    if learner_hold.exists():
+        learner_hold.rename(target_root / "learner")
     logging.info("Generated %d encrypted English Breviary pages", len(outputs))
+
+
+def prepare_english_learner_bodies(
+    day_sites: list[EnglishDaySite], language: LearnerLanguage
+) -> dict[str, dict[str, str]]:
+    learner_bodies: dict[str, dict[str, str]] = {}
+    for site in day_sites:
+        date_name = date_dir_name(site.date)
+        learner_bodies[date_name] = {
+            prayer.slug: learner_prayer_body(prayer, language) for prayer in site.prayers
+        }
+    language.save()
+    return learner_bodies
+
+
+def write_english_learner(
+    day_sites: list[EnglishDaySite],
+    passcode: str,
+    learner_bodies: dict[str, dict[str, str]],
+) -> None:
+    """Write the separate paired-column learner edition after normal English."""
+    target_root = SITE_DIR / "breviary" / "en" / "learner"
+    updated = datetime.now(VN_TZ).strftime("%d/%m/%Y %H:%M Vietnam time")
+    available_dates = [site.date for site in day_sites]
+    today = day_sites[len(day_sites) // 2]
+
+    paginated = {
+        date_name: {
+            slug: paginate_learner_html(body) for slug, body in prayers.items()
+        }
+        for date_name, prayers in learner_bodies.items()
+    }
+
+    documents: list[dict[str, str]] = []
+    outputs: list[dict[str, object]] = []
+
+    def add_document(
+        page_id: str,
+        path: Path,
+        css_href: str,
+        plaintext: str,
+        *,
+        unlock_page: bool = False,
+        unlock_href: str = "index.html",
+        first_page: bool = False,
+    ) -> None:
+        documents.append({"id": page_id, "html": plaintext})
+        outputs.append(
+            {
+                "id": page_id,
+                "path": path,
+                "css_href": css_href,
+                "unlock_page": unlock_page,
+                "unlock_href": unlock_href,
+                "first_page": first_page,
+            }
+        )
+
+    add_document(
+        "learner-root-index",
+        target_root / "index.html",
+        "../../../breviary.css?v=4-encrypted-learner",
+        learner_index_inner(today, available_dates, updated, ""),
+        unlock_page=True,
+    )
+
+    def add_site_documents(site: EnglishDaySite, target_dir: Path, prefix: str, dated: bool) -> None:
+        date_name = date_dir_name(site.date)
+        css_href = (
+            "../../../../breviary.css?v=4-encrypted-learner"
+            if dated
+            else "../../../breviary.css?v=4-encrypted-learner"
+        )
+        unlock_href = "../index.html" if dated else "index.html"
+        if dated:
+            add_document(
+                f"learner-{date_name}-index",
+                target_dir / "index.html",
+                css_href,
+                learner_index_inner(site, available_dates, updated, date_name),
+                unlock_href=unlock_href,
+            )
+
+        prayer_by_slug = {prayer.slug: prayer for prayer in site.prayers}
+        ordered = [prayer_by_slug[slug] for _, slug in ENGLISH_PRAYERS]
+        for prayer_index, prayer in enumerate(ordered):
+            pages = paginated[date_name][prayer.slug]
+            for page_index, page_body in enumerate(pages, start=1):
+                previous_href = None
+                next_href = None
+                if page_index > 1:
+                    previous_href = prayer_page_filename(prayer.slug, page_index - 1)
+                elif prayer_index > 0:
+                    previous = ordered[prayer_index - 1]
+                    previous_href = prayer_page_filename(
+                        previous.slug, len(paginated[date_name][previous.slug])
+                    )
+                if page_index < len(pages):
+                    next_href = prayer_page_filename(prayer.slug, page_index + 1)
+                elif prayer_index + 1 < len(ordered):
+                    next_href = prayer_page_filename(ordered[prayer_index + 1].slug, 1)
+                nav = english_breviary_nav_html(previous_href, next_href)
+                plaintext = learner_prayer_inner(
+                    prayer,
+                    site.liturgical_day,
+                    page_body,
+                    page_index,
+                    len(pages),
+                    nav,
+                    updated,
+                )
+                add_document(
+                    f"learner-{prefix}{prayer.slug}-{page_index}",
+                    target_dir / prayer_page_filename(prayer.slug, page_index),
+                    css_href,
+                    plaintext,
+                    unlock_href=unlock_href,
+                    first_page=page_index == 1,
+                )
+
+    for site in day_sites:
+        add_site_documents(
+            site,
+            target_root / date_dir_name(site.date),
+            f"{date_dir_name(site.date)}-",
+            True,
+        )
+    add_site_documents(today, target_root, "root-", False)
+
+    ciphertexts = encrypt_english_pages(documents, passcode)
+    temporary = target_root.with_name("learner.new")
+    if temporary.exists():
+        shutil.rmtree(temporary)
+    temporary.mkdir(parents=True)
+    for output in outputs:
+        relative = Path(output["path"]).relative_to(target_root)
+        destination = temporary / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(
+            english_encrypted_shell(
+                ciphertexts[str(output["id"])],
+                str(output["css_href"]),
+                unlock_page=bool(output["unlock_page"]),
+                unlock_href=str(output["unlock_href"]),
+                first_page=bool(output["first_page"]),
+                session_key=ENGLISH_LEARNER_SESSION_KEY,
+                body_class="learner-page",
+            ),
+            encoding="utf-8",
+        )
+    if target_root.exists():
+        shutil.rmtree(target_root)
+    temporary.rename(target_root)
+    logging.info("Generated %d encrypted English learner pages", len(outputs))
 
 
 def build_english_breviary(run_date: datetime, passcode: str) -> None:
@@ -3146,7 +3886,27 @@ def build_english_breviary(run_date: datetime, passcode: str) -> None:
         fetch_english_day(session, date)
         for date in (run_date - timedelta(days=1), run_date, run_date + timedelta(days=1))
     ]
-    write_english_breviary(sites, passcode)
+    learner_api_key = os.environ.get(LEARNER_GEMINI_API_KEY_ENV, "")
+    learner_bodies: dict[str, dict[str, str]] | None = None
+    if not learner_api_key:
+        logging.warning(
+            "%s is not configured; preserving the last English learner edition",
+            LEARNER_GEMINI_API_KEY_ENV,
+        )
+    else:
+        language = LearnerLanguage(learner_api_key)
+        # Enrich before touching site/breviary/en so a failed language request
+        # leaves both the regular and learner editions from the prior build.
+        learner_bodies = prepare_english_learner_bodies(sites, language)
+    existing_learner = (SITE_DIR / "breviary" / "en" / "learner").is_dir()
+    write_english_breviary(
+        sites,
+        passcode,
+        preserve_learner=learner_bodies is None,
+        include_learner_link=learner_bodies is not None or existing_learner,
+    )
+    if learner_bodies is not None:
+        write_english_learner(sites, passcode, learner_bodies)
 
 
 DEBUG_PROSE = (

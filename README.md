@@ -42,6 +42,12 @@ sinh lại phần tiếng Anh ở local:
 BREVIARY_EN_PASSCODE=123456 .venv/bin/python scripts/fetch.py --english-only
 ```
 
+Chế độ học tiếng Anh nằm tại `/breviary/en/learner/`. Nó chỉ được sinh khi có
+thêm `BREVIARY_LEARNER_GEMINI_API_KEY`; Gemini API chỉ chạy lúc build để tạo phiên âm
+kiểu Việt và giải thích từ đơn giản. Kindle chỉ nhận HTML mã hóa đã tạo sẵn,
+không gọi API hay tải tài nguyên ngoài lúc đọc. GitHub Actions giữ cache ngắn
+hạn của kết quả ngôn ngữ để tránh tạo lại các câu lặp.
+
 ## Test
 
 ```sh
