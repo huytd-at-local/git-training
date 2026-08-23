@@ -29,6 +29,7 @@ test -f site/debug/encrypted-breviary.html
 test -f site/debug/encrypted-breviary-legacy.html
 test -f site/debug/encrypted-breviary-session-2.html
 test -f scripts/encrypt_breviary.js
+test -f scripts/decrypt_breviary.js
 grep -q 'BREVIARY_EN_PASSCODE' .github/workflows/pages.yml
 ! grep -R -q '211216' scripts site .github tests vendor
 test -f vendor/sjcl.js
@@ -175,6 +176,7 @@ from scripts.fetch import (
     page_units,
     prepare_english_learner_bodies,
     paginate_learner_html,
+    restore_english_learner_bodies,
     text_units,
     EnglishDaySite,
     LiturgicalDay,
@@ -404,20 +406,20 @@ if len(today_only_language.glossary_calls) != 1 or len(today_only_language.gloss
 if len(learner_write_sites) != 1 or [site.date for site in learner_write_sites[0]] != [learner_today.date()]:
     raise SystemExit("Learner writer must receive today only")
 
-# A normal push preserves the encrypted learner directory restored from the
-# Actions cache and must not spend Gemini quota again.
-preserved_builds = []
+# A normal push restores the encrypted learner directory from the Actions
+# cache, repaginates it locally, and must not spend Gemini quota again.
+normal_rebuilds = []
+repaged_builds = []
 original_site_dir = fetch_module.SITE_DIR
 try:
     with tempfile.TemporaryDirectory() as temporary_dir:
         fetch_module.SITE_DIR = Path(temporary_dir) / "site"
         learner_root = fetch_module.SITE_DIR / "breviary" / "en" / "learner"
-        learner_root.mkdir(parents=True)
+        learner_bodies = {
+            "2026-08-23": {slug: learner_body for _, slug in ENGLISH_PRAYERS}
+        }
+        write_english_learner([test_day], "123456", learner_bodies)
         preserved_page = learner_root / "index.html"
-        preserved_page.write_text(
-            '<link rel="stylesheet" href="../../../breviary.css?v=4-encrypted-learner">',
-            encoding="utf-8",
-        )
         fetch_module.refresh_preserved_learner_stylesheet(learner_root)
         if f"v={fetch_module.BREVIARY_CSS_VERSION}-encrypted-learner" not in preserved_page.read_text(encoding="utf-8"):
             raise SystemExit("Preserved learner CSS reference was not cache-busted")
@@ -425,10 +427,8 @@ try:
         fetch_module.LearnerLanguage = lambda *_args: (_ for _ in ()).throw(
             SystemExit("A push with a cached learner must not call Gemini")
         )
-        fetch_module.write_english_breviary = lambda *_args, **kwargs: preserved_builds.append(kwargs)
-        fetch_module.write_english_learner = lambda *_args: (_ for _ in ()).throw(
-            SystemExit("A push with a cached learner must not rewrite it")
-        )
+        fetch_module.write_english_breviary = lambda *_args, **kwargs: normal_rebuilds.append(kwargs)
+        fetch_module.write_english_learner = lambda sites, _passcode, bodies: repaged_builds.append((sites, bodies))
         os.environ[fetch_module.LEARNER_GEMINI_API_KEY_ENV] = "test-key"
         os.environ[fetch_module.LEARNER_REFRESH_ENV] = "0"
         build_english_breviary(learner_today, "123456")
@@ -446,8 +446,12 @@ finally:
         os.environ.pop(fetch_module.LEARNER_REFRESH_ENV, None)
     else:
         os.environ[fetch_module.LEARNER_REFRESH_ENV] = original_learner_refresh
-if preserved_builds != [{"preserve_learner": True, "include_learner_link": True}]:
-    raise SystemExit("A push must preserve the cached learner edition")
+if normal_rebuilds != [{"preserve_learner": False, "include_learner_link": True}]:
+    raise SystemExit("A push must rebuild normal English around the locally repaginated learner")
+if len(repaged_builds) != 1 or [site.date for site in repaged_builds[0][0]] != [learner_today.date()]:
+    raise SystemExit("A push must repaginate today's cached learner edition")
+if set(repaged_builds[0][1]["2026-08-23"]) != {slug for _, slug in ENGLISH_PRAYERS}:
+    raise SystemExit("A push lost cached learner rows while repaginating")
 
 with tempfile.TemporaryDirectory() as temporary_dir:
     original_site_dir = fetch_module.SITE_DIR
@@ -461,6 +465,12 @@ with tempfile.TemporaryDirectory() as temporary_dir:
         learner_index = fetch_module.SITE_DIR / "breviary" / "en" / "learner" / "index.html"
         if not learner_index.is_file():
             raise SystemExit("Learner writer did not create its encrypted root index")
+        restored_bodies = restore_english_learner_bodies(
+            learner_index.parent, "123456", test_day.date
+        )
+        if restored_bodies["2026-08-23"]["morning-prayer"].count("learner-row") != learner_body.count("learner-row"):
+            raise SystemExit("Cached learner re-pagination lost paired rows")
+        write_english_learner([test_day], "123456", restored_bodies)
         write_english_breviary([test_day], "123456", preserve_learner=True)
         if not learner_index.is_file():
             raise SystemExit("Normal English rebuild removed the learner edition without an API key")

@@ -95,6 +95,7 @@ ENGLISH_PRAYERS = [
 ENGLISH_SESSION_KEY = "breviary-en-key-v1"
 ENGLISH_LEARNER_SESSION_KEY = "breviary-en-learner-key-v1"
 ENCRYPT_HELPER = ROOT / "scripts" / "encrypt_breviary.js"
+DECRYPT_HELPER = ROOT / "scripts" / "decrypt_breviary.js"
 
 BREVIARY_CSS = """
 /* Monastic Breviary: ornament only; production pagination metrics stay unchanged. */
@@ -309,7 +310,7 @@ BREVIARY_CSS = """
       margin-top: 14px;
     }
 """
-BREVIARY_CSS_VERSION = "5"
+BREVIARY_CSS_VERSION = "6"
 
 PAGE_TARGET_UNITS = 17.4
 FIRST_PAGE_TARGET_UNITS = 14.4
@@ -337,11 +338,11 @@ SPLIT_PARAGRAPH_CHUNK_LINES = 2
 # only 18/16 characters per line, although the device fits roughly 30/26 at
 # the learner font size.  That made every page stop far too early.  Keep these
 # learner-only settings isolated from the established Vietnamese paginator.
-LEARNER_PAGE_TARGET_UNITS = 23.0
-LEARNER_FIRST_PAGE_TARGET_UNITS = 13.0
-LEARNER_MIN_PAGE_UNITS = 15.0
-LEARNER_LEFT_CHARS_PER_LINE = 30
-LEARNER_RIGHT_CHARS_PER_LINE = 26
+LEARNER_PAGE_TARGET_UNITS = 26.0
+LEARNER_FIRST_PAGE_TARGET_UNITS = 15.0
+LEARNER_MIN_PAGE_UNITS = 18.0
+LEARNER_LEFT_CHARS_PER_LINE = 25
+LEARNER_RIGHT_CHARS_PER_LINE = 22
 LEARNER_ROW_SPACING_UNITS = 0.12
 LEARNER_MAX_FRAGMENT_CHARS = 92
 # The Gemini free tier currently exposes a 20-requests-per-minute ceiling for
@@ -3696,6 +3697,125 @@ def encrypt_english_pages(pages: list[dict[str, str]], passcode: str) -> dict[st
     return {page_id: json.loads(payload) for page_id, payload in encoded.items()}
 
 
+def encrypted_shell_ciphertext(path: Path) -> str:
+    """Read the already encrypted payload from one learner shell.
+
+    The shell stores an encoded SJCL JSON string in ``var CIPHERTEXT``.  This
+    parser deliberately reads only that assignment rather than evaluating any
+    HTML or JavaScript from the downloaded Pages artifact.
+    """
+    source = path.read_text(encoding="utf-8")
+    marker = "var CIPHERTEXT = "
+    start = source.find(marker)
+    if start < 0:
+        raise LearnerLanguageError(f"Encrypted learner payload is missing in {path}")
+    encoded = source[start + len(marker):].lstrip()
+    try:
+        payload, _ = json.JSONDecoder().raw_decode(encoded)
+    except json.JSONDecodeError as error:
+        raise LearnerLanguageError(f"Encrypted learner payload is invalid in {path}") from error
+    if not isinstance(payload, str):
+        raise LearnerLanguageError(f"Encrypted learner payload has an unexpected format in {path}")
+    return payload
+
+
+def decrypt_english_pages(pages: list[dict[str, str]], passcode: str) -> dict[str, str]:
+    """Decrypt learner fragments in memory for an immediate local re-page."""
+    environment = os.environ.copy()
+    environment[ENGLISH_BREVIARY_PASSCODE_ENV] = passcode
+    result = subprocess.run(
+        ["node", str(DECRYPT_HELPER)],
+        input=json.dumps({"pages": pages}),
+        text=True,
+        capture_output=True,
+        check=True,
+        env=environment,
+        cwd=ROOT,
+    )
+    decoded = json.loads(result.stdout)
+    if not all(isinstance(value, str) for value in decoded.values()):
+        raise LearnerLanguageError("Decrypted learner payload has an unexpected format")
+    return decoded
+
+
+def learner_page_files(learner_root: Path, slug: str) -> list[Path]:
+    """Return current-day encrypted learner pages for one Office in order."""
+    pattern = re.compile(rf"^{re.escape(slug)}(?:-(\d+))?\.html$")
+    indexed: list[tuple[int, Path]] = []
+    for path in learner_root.glob(f"{slug}*.html"):
+        match = pattern.fullmatch(path.name)
+        if match:
+            indexed.append((int(match.group(1) or 1), path))
+    indexed.sort(key=lambda item: item[0])
+    if not indexed or [number for number, _ in indexed] != list(range(1, len(indexed) + 1)):
+        raise LearnerLanguageError(f"Cached learner pages are incomplete for {slug}")
+    return [path for _, path in indexed]
+
+
+def learner_body_from_decrypted_pages(plaintext_pages: list[str]) -> str:
+    """Reassemble paired learner blocks without headers or bottom navigation."""
+    blocks: list[str] = []
+    glossary_open = False
+    for plaintext in plaintext_pages:
+        wrapper = fragment_soup(plaintext).find("div")
+        if wrapper is None:
+            continue
+        for child in wrapper.children:
+            if not isinstance(child, Tag):
+                continue
+            classes = set(child.get("class", []))
+            is_row = "learner-row" in classes
+            is_heading = child.name in {"h2", "h3"}
+            if not is_row and not is_heading:
+                continue
+            if is_heading and normalize_key(child.get_text(" ", strip=True)) == "words in this prayer":
+                if not glossary_open:
+                    blocks.append('<section class="learner-glossary">')
+                    glossary_open = True
+            blocks.append(str(child))
+    if glossary_open:
+        blocks.append("</section>")
+    if not blocks:
+        raise LearnerLanguageError("Cached learner edition did not contain paired reading rows")
+    return "<div>" + "\n".join(blocks) + "</div>"
+
+
+def restore_english_learner_bodies(
+    learner_root: Path, passcode: str, date: datetime
+) -> dict[str, dict[str, str]]:
+    """Reuse the cached language work while applying the current paginator.
+
+    The cached edition contains Gemini's pronunciation and glossary results.
+    We decrypt its current-day pages only inside the build process, join their
+    paired rows back into each Office, and let ``write_english_learner`` encrypt
+    them again after pagination.  No plaintext is written to disk.
+    """
+    index_path = learner_root / "index.html"
+    if not index_path.is_file():
+        raise LearnerLanguageError("Cached learner unlock page is missing")
+    # The first unlock page derives the session key; every later page in this
+    # edition is encrypted with that key so Kindle can open it without asking
+    # for the passcode again.
+    page_sources: list[dict[str, str]] = [
+        {"id": "learner-root-index", "ciphertext": encrypted_shell_ciphertext(index_path)}
+    ]
+    prayer_pages: dict[str, list[str]] = {}
+    for _, slug in ENGLISH_PRAYERS:
+        page_ids: list[str] = []
+        for page_index, path in enumerate(learner_page_files(learner_root, slug), start=1):
+            page_id = f"{slug}-{page_index}"
+            page_sources.append({"id": page_id, "ciphertext": encrypted_shell_ciphertext(path)})
+            page_ids.append(page_id)
+        prayer_pages[slug] = page_ids
+    decrypted = decrypt_english_pages(page_sources, passcode)
+    restored = {
+        slug: learner_body_from_decrypted_pages([decrypted[page_id] for page_id in page_ids])
+        for slug, page_ids in prayer_pages.items()
+    }
+    logging.info("Repaginated cached English learner content without calling Gemini")
+    return {date_dir_name(date): restored}
+
+
 def write_english_breviary(
     day_sites: list[EnglishDaySite],
     passcode: str,
@@ -4063,12 +4183,8 @@ def build_english_breviary(run_date: datetime, passcode: str) -> None:
     existing_learner = (SITE_DIR / "breviary" / "en" / "learner").is_dir()
     refresh_learner = os.environ.get(LEARNER_REFRESH_ENV, "").strip() == "1"
     learner_bodies: dict[str, dict[str, str]] | None = None
-    if not learner_api_key:
-        logging.warning(
-            "%s is not configured; preserving the last English learner edition",
-            LEARNER_GEMINI_API_KEY_ENV,
-        )
-    elif refresh_learner or not existing_learner:
+    learner_sites = [sites[1]]
+    if refresh_learner and learner_api_key:
         language = LearnerLanguage(learner_api_key)
         # Enrich before touching site/breviary/en so a failed language request
         # leaves both the regular and learner editions from the prior build.
@@ -4076,12 +4192,20 @@ def build_english_breviary(run_date: datetime, passcode: str) -> None:
         # paired Kindle layout focused on the current Office and, with the
         # Gemini free-tier request budget, avoids generating three complete
         # days of pronunciation and glossary material on every refresh.
-        learner_sites = [sites[1]]
+        learner_bodies = prepare_english_learner_bodies(learner_sites, language)
+    elif existing_learner:
+        # A presentation-only deploy must apply new Kindle pagination rather
+        # than merely changing the CSS around stale, encrypted page breaks.
+        learner_bodies = restore_english_learner_bodies(
+            SITE_DIR / "breviary" / "en" / "learner", passcode, learner_sites[0].date
+        )
+    elif learner_api_key:
+        language = LearnerLanguage(learner_api_key)
         learner_bodies = prepare_english_learner_bodies(learner_sites, language)
     else:
-        logging.info(
-            "Preserving the cached English learner edition; set %s=1 to refresh it",
-            LEARNER_REFRESH_ENV,
+        logging.warning(
+            "%s is not configured; preserving the last English learner edition",
+            LEARNER_GEMINI_API_KEY_ENV,
         )
     write_english_breviary(
         sites,
