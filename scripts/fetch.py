@@ -28,7 +28,7 @@ DIVINE_OFFICE_URL = "https://divineoffice.org/"
 ENGLISH_BREVIARY_PASSCODE_ENV = "BREVIARY_EN_PASSCODE"
 LEARNER_GEMINI_API_KEY_ENV = "BREVIARY_LEARNER_GEMINI_API_KEY"
 LEARNER_GEMINI_MODEL_ENV = "BREVIARY_LEARNER_GEMINI_MODEL"
-LEARNER_GEMINI_DEFAULT_MODEL = "gemini-2.5-flash-lite"
+LEARNER_GEMINI_DEFAULT_MODEL = "gemini-2.5-flash"
 GEMINI_GENERATE_CONTENT_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 TIMEOUT_SECONDS = 30
 ROOT = Path(__file__).resolve().parents[1]
@@ -849,7 +849,13 @@ class LearnerLanguage:
             },
             timeout=TIMEOUT_SECONDS * 3,
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as error:
+            detail = re.sub(r"\s+", " ", response.text).strip()[:600]
+            raise LearnerLanguageError(
+                f"Gemini {name} request failed ({response.status_code}): {detail or error}"
+            ) from error
         try:
             return json.loads(gemini_response_text(response.json()))
         except (ValueError, json.JSONDecodeError) as error:
@@ -4805,6 +4811,8 @@ def main() -> int:
                 logging.exception(
                     "English Breviary update failed; preserving the last committed encrypted copy"
                 )
+                if os.environ.get(LEARNER_GEMINI_API_KEY_ENV):
+                    raise
         else:
             logging.warning(
                 "%s is not configured; preserving the last committed English Breviary",

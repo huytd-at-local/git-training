@@ -46,7 +46,9 @@ Chế độ học tiếng Anh nằm tại `/breviary/en/learner/`. Nó chỉ đ�
 thêm `BREVIARY_LEARNER_GEMINI_API_KEY`; Gemini API chỉ chạy lúc build để tạo phiên âm
 kiểu Việt và giải thích từ đơn giản. Kindle chỉ nhận HTML mã hóa đã tạo sẵn,
 không gọi API hay tải tài nguyên ngoài lúc đọc. GitHub Actions giữ cache ngắn
-hạn của kết quả ngôn ngữ để tránh tạo lại các câu lặp.
+hạn của kết quả ngôn ngữ để tránh tạo lại các câu lặp. Model mặc định là
+`gemini-2.5-flash`; khi learner secret đã được cấu hình mà Gemini không tạo được
+nội dung, workflow sẽ fail thay vì deploy một website thiếu learner edition.
 
 ## Test
 

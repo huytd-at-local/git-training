@@ -43,7 +43,7 @@ jobs:
         env:
           BREVIARY_EN_PASSCODE: ${{ secrets.BREVIARY_EN_PASSCODE }}
           BREVIARY_LEARNER_GEMINI_API_KEY: ${{ secrets.BREVIARY_LEARNER_GEMINI_API_KEY }}
-          BREVIARY_LEARNER_GEMINI_MODEL: gemini-2.5-flash-lite
+          BREVIARY_LEARNER_GEMINI_MODEL: gemini-2.5-flash
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
