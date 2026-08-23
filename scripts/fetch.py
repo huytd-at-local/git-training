@@ -343,12 +343,13 @@ LEARNER_RIGHT_CHARS_PER_LINE = 16
 LEARNER_ROW_SPACING_UNITS = 0.36
 LEARNER_MAX_FRAGMENT_CHARS = 92
 # The Gemini free tier currently exposes a 20-requests-per-minute ceiling for
-# this project.  A full three-day learner build contains about 2,200 distinct
-# source lines.  These limits keep a cold-cache build to seven requests:
-# four pronunciation batches, two glossary batches, and one glossary-guide
-# batch.  They are deliberately based on the real Divine Office payload, not
-# the smaller debug fixture.
-LEARNER_GUIDANCE_BATCH_SIZE = 600
+# this project.  A current-day learner build can contain about 925 distinct
+# source lines.  These limits keep a cold-cache build to nine requests:
+# seven quick pronunciation batches, one glossary batch, and one
+# glossary-guide batch.  A larger 600-line batch exceeded the HTTP response
+# timeout on the free tier, so the request count is intentionally traded for
+# reliable, short individual responses.
+LEARNER_GUIDANCE_BATCH_SIZE = 150
 LEARNER_GLOSSARY_BATCH_SIZE = 12
 LEARNER_MAX_RETRIES = 3
 LEARNER_MAX_RETRY_SECONDS = 60
