@@ -167,6 +167,7 @@ from scripts.fetch import (
     learner_page_units,
     learner_prayer_body,
     page_units,
+    prepare_english_learner_bodies,
     paginate_learner_html,
     text_units,
     EnglishDaySite,
@@ -266,6 +267,38 @@ test_day = EnglishDaySite(
     [Prayer(title, slug, "<p>God, come to my assistance.</p>") for title, slug in ENGLISH_PRAYERS],
     LiturgicalDay("Sunday", "", "test", "August 23"),
 )
+
+class BatchLearnerLanguage:
+    def __init__(self):
+        self.pronunciation_calls = []
+        self.glossary_calls = []
+
+    def pronunciations(self, texts):
+        self.pronunciation_calls.append(list(texts))
+        return {text: "PHIÊN-ÂM MẪU." for text in texts}
+
+    def glossaries(self, prayers):
+        self.glossary_calls.append(list(prayers))
+        return {
+            prayer_id: [
+                {"term": term, "definition": "a simple word in this prayer"}
+                for term in ("God", "come", "to", "my", "assistance", "help")
+            ]
+            for prayer_id, _, _ in prayers
+        }
+
+    def save(self):
+        return None
+
+batch_language = BatchLearnerLanguage()
+batched_bodies = prepare_english_learner_bodies([test_day], batch_language)
+if len(batch_language.pronunciation_calls) != 2 or len(batch_language.glossary_calls) != 1:
+    raise SystemExit("Learner preparation must batch pronunciation and glossary API work")
+if len(batch_language.glossary_calls[0]) != len(ENGLISH_PRAYERS):
+    raise SystemExit("Learner glossary work must include all prayers in one preparation pass")
+if set(batched_bodies["2026-08-23"]) != {slug for _, slug in ENGLISH_PRAYERS}:
+    raise SystemExit("Batched learner preparation omitted a prayer")
+
 with tempfile.TemporaryDirectory() as temporary_dir:
     original_site_dir = fetch_module.SITE_DIR
     fetch_module.SITE_DIR = Path(temporary_dir) / "site"

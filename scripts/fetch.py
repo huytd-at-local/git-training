@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -341,7 +342,10 @@ LEARNER_LEFT_CHARS_PER_LINE = 18
 LEARNER_RIGHT_CHARS_PER_LINE = 16
 LEARNER_ROW_SPACING_UNITS = 0.36
 LEARNER_MAX_FRAGMENT_CHARS = 92
-LEARNER_GUIDANCE_BATCH_SIZE = 30
+LEARNER_GUIDANCE_BATCH_SIZE = 120
+LEARNER_GLOSSARY_BATCH_SIZE = 4
+LEARNER_MAX_RETRIES = 3
+LEARNER_MAX_RETRY_SECONDS = 30
 LEARNER_CACHE_FILE = CACHE_DIR / "breviary-learner-language-v2.json"
 
 LABEL_PATTERNS = [
@@ -807,6 +811,17 @@ def gemini_response_text(response: dict) -> str:
     return value
 
 
+def gemini_retry_seconds(response: requests.Response) -> float:
+    retry_after = response.headers.get("retry-after", "").strip()
+    try:
+        return max(1.0, min(float(retry_after), LEARNER_MAX_RETRY_SECONDS))
+    except ValueError:
+        match = re.search(r"retry in\\s+(\\d+(?:\\.\\d+)?)s", response.text, flags=re.IGNORECASE)
+        if match:
+            return max(1.0, min(float(match.group(1)), LEARNER_MAX_RETRY_SECONDS))
+    return 5.0
+
+
 class LearnerLanguage:
     """Build-time British pronunciation and beginner glossary generator.
 
@@ -832,34 +847,56 @@ class LearnerLanguage:
         )
 
     def request_json(self, name: str, schema: dict, instructions: str, payload: dict) -> dict:
-        response = requests.post(
-            GEMINI_GENERATE_CONTENT_URL.format(model=self.model),
-            headers={
-                "Content-Type": "application/json",
-                "x-goog-api-key": self.api_key,
+        request_body = {
+            "systemInstruction": {"parts": [{"text": instructions}]},
+            "contents": [{"parts": [{"text": json.dumps(payload, ensure_ascii=False)}]}],
+            "generationConfig": {
+                "temperature": 0.2,
+                "responseMimeType": "application/json",
+                "responseJsonSchema": schema,
             },
-            json={
-                "systemInstruction": {"parts": [{"text": instructions}]},
-                "contents": [{"parts": [{"text": json.dumps(payload, ensure_ascii=False)}]}],
-                "generationConfig": {
-                    "temperature": 0.2,
-                    "responseMimeType": "application/json",
-                    "responseJsonSchema": schema,
-                },
-            },
-            timeout=TIMEOUT_SECONDS * 3,
-        )
-        try:
-            response.raise_for_status()
-        except requests.HTTPError as error:
-            detail = re.sub(r"\s+", " ", response.text).strip()[:600]
-            raise LearnerLanguageError(
-                f"Gemini {name} request failed ({response.status_code}): {detail or error}"
-            ) from error
-        try:
-            return json.loads(gemini_response_text(response.json()))
-        except (ValueError, json.JSONDecodeError) as error:
-            raise LearnerLanguageError(f"Invalid Gemini {name} response: {error}") from error
+        }
+        for attempt in range(LEARNER_MAX_RETRIES):
+            try:
+                response = requests.post(
+                    GEMINI_GENERATE_CONTENT_URL.format(model=self.model),
+                    headers={
+                        "Content-Type": "application/json",
+                        "x-goog-api-key": self.api_key,
+                    },
+                    json=request_body,
+                    timeout=TIMEOUT_SECONDS * 3,
+                )
+            except requests.RequestException as error:
+                if attempt + 1 == LEARNER_MAX_RETRIES:
+                    raise LearnerLanguageError(f"Gemini {name} request failed: {error}") from error
+                delay = min(2**attempt, LEARNER_MAX_RETRY_SECONDS)
+                logging.warning("Gemini %s request failed; retrying in %ss", name, delay)
+                time.sleep(delay)
+                continue
+            if getattr(response, "status_code", None) == 429 and attempt + 1 < LEARNER_MAX_RETRIES:
+                delay = gemini_retry_seconds(response)
+                logging.warning(
+                    "Gemini rate-limited %s; retrying in %.1fs (%d/%d)",
+                    name,
+                    delay,
+                    attempt + 1,
+                    LEARNER_MAX_RETRIES,
+                )
+                time.sleep(delay)
+                continue
+            try:
+                response.raise_for_status()
+            except requests.HTTPError as error:
+                detail = re.sub(r"\s+", " ", response.text).strip()[:600]
+                raise LearnerLanguageError(
+                    f"Gemini {name} request failed ({response.status_code}): {detail or error}"
+                ) from error
+            try:
+                return json.loads(gemini_response_text(response.json()))
+            except (ValueError, json.JSONDecodeError) as error:
+                raise LearnerLanguageError(f"Invalid Gemini {name} response: {error}") from error
+        raise LearnerLanguageError(f"Gemini {name} request exhausted retries")
 
     def pronunciations(self, texts: list[str]) -> dict[str, str]:
         unique = list(dict.fromkeys(text for text in texts if text.strip()))
@@ -911,48 +948,89 @@ class LearnerLanguage:
                 result[item["text"]] = guide.strip()
                 self.cache["pronunciations"][learner_cache_key(item["text"])] = guide.strip()
                 self.changed = True
+            self.save()
         return result
 
     def glossary(self, prayer_title: str, source_text: str) -> list[dict[str, str]]:
-        cache_key = learner_cache_key(f"{prayer_title}\n{source_text}")
-        cached = self.cache["glossaries"].get(cache_key)
-        if isinstance(cached, list) and all(isinstance(item, dict) for item in cached):
-            return cached
+        return self.glossaries([("single", prayer_title, source_text)])["single"]
+
+    def glossaries(self, prayers: list[tuple[str, str, str]]) -> dict[str, list[dict[str, str]]]:
+        result: dict[str, list[dict[str, str]]] = {}
+        missing: list[tuple[str, str, str, str]] = []
+        for prayer_id, prayer_title, source_text in prayers:
+            cache_key = learner_cache_key(f"{prayer_title}\n{source_text}")
+            cached = self.cache["glossaries"].get(cache_key)
+            if isinstance(cached, list) and all(isinstance(item, dict) for item in cached):
+                result[prayer_id] = cached
+            else:
+                missing.append((prayer_id, prayer_title, source_text, cache_key))
+        if not missing:
+            return result
         schema = {
             "type": "object",
             "required": ["items"],
             "properties": {
                 "items": {
                     "type": "array",
-                    "minItems": 6,
-                    "maxItems": 12,
                     "items": {
                         "type": "object",
-                        "required": ["term", "definition"],
+                        "required": ["id", "terms"],
                         "properties": {
-                            "term": {"type": "string"},
-                            "definition": {"type": "string"},
+                            "id": {"type": "string"},
+                            "terms": {
+                                "type": "array",
+                                "minItems": 6,
+                                "maxItems": 12,
+                                "items": {
+                                    "type": "object",
+                                    "required": ["term", "definition"],
+                                    "properties": {
+                                        "term": {"type": "string"},
+                                        "definition": {"type": "string"},
+                                    },
+                                },
+                            },
                         },
                     },
                 }
             },
         }
         instructions = (
-            "Select 6 to 12 English words or short phrases from the supplied prayer that could "
-            "confuse a learner of English after about six months of study. Copy every selected "
-            "term exactly from the prayer. For each, write one very simple English definition, "
-            "maximum 12 words. Do not translate, do not use markdown, and do not add terms that "
-            "do not appear in the prayer."
+            "For each supplied prayer, select 6 to 12 English words or short phrases that could "
+            "confuse a learner of English after about six months of study. Return exactly one "
+            "item for each supplied id. Copy every selected term exactly from its own prayer. "
+            "For each, write one very simple English definition, maximum 12 words. Do not "
+            "translate, use markdown, or add terms that do not appear in that prayer."
         )
-        payload = self.request_json(
-            "beginner_prayer_glossary",
-            schema,
-            instructions,
-            {"prayer_title": prayer_title, "prayer_text": source_text},
-        )
-        items = payload.get("items")
-        if not isinstance(items, list):
-            raise LearnerLanguageError("Glossary response omitted items")
+        for offset in range(0, len(missing), LEARNER_GLOSSARY_BATCH_SIZE):
+            batch = missing[offset : offset + LEARNER_GLOSSARY_BATCH_SIZE]
+            payload = self.request_json(
+                "beginner_prayer_glossaries",
+                schema,
+                instructions,
+                {
+                    "items": [
+                        {"id": prayer_id, "prayer_title": title, "prayer_text": text}
+                        for prayer_id, title, text, _ in batch
+                    ]
+                },
+            )
+            groups = payload.get("items")
+            if not isinstance(groups, list):
+                raise LearnerLanguageError("Glossary response omitted items")
+            by_id = {group.get("id"): group.get("terms") for group in groups if isinstance(group, dict)}
+            for prayer_id, _, source_text, cache_key in batch:
+                terms = by_id.get(prayer_id)
+                if not isinstance(terms, list):
+                    raise LearnerLanguageError(f"Glossary response omitted {prayer_id}")
+                result[prayer_id] = self.validate_glossary_terms(terms, source_text)
+                self.cache["glossaries"][cache_key] = result[prayer_id]
+                self.changed = True
+            self.save()
+        return result
+
+    @staticmethod
+    def validate_glossary_terms(items: list, source_text: str) -> list[dict[str, str]]:
         validated: list[dict[str, str]] = []
         source_key = re.sub(r"\s+", " ", source_text).casefold()
         seen: set[str] = set()
@@ -978,8 +1056,6 @@ class LearnerLanguage:
             validated.append({"term": term, "definition": definition})
         if len(validated) < 6:
             raise LearnerLanguageError("Glossary response did not provide six valid source terms")
-        self.cache["glossaries"][cache_key] = validated
-        self.changed = True
         return validated
 
 
@@ -2834,10 +2910,18 @@ def learner_source_units(body_html: str) -> list[tuple[str, str]]:
     return units
 
 
-def learner_prayer_body(prayer: Prayer, language: LearnerLanguage) -> str:
-    units = learner_source_units(prayer.body_html)
+def learner_prayer_body(
+    prayer: Prayer,
+    language: LearnerLanguage,
+    *,
+    units: list[tuple[str, str]] | None = None,
+    pronunciations: dict[str, str] | None = None,
+    glossary: list[dict[str, str]] | None = None,
+    glossary_guides: dict[str, str] | None = None,
+) -> str:
+    units = units if units is not None else learner_source_units(prayer.body_html)
     sentences = [value for kind, value in units if kind == "sentence"]
-    pronunciations = language.pronunciations(sentences)
+    pronunciations = pronunciations if pronunciations is not None else language.pronunciations(sentences)
     rendered: list[str] = []
     for kind, value in units:
         if kind == "heading":
@@ -2846,9 +2930,9 @@ def learner_prayer_body(prayer: Prayer, language: LearnerLanguage) -> str:
             rendered.append(learner_row_html(value, pronunciations[value]))
 
     source_text = " ".join(sentences)
-    glossary = language.glossary(prayer.title, source_text)
+    glossary = glossary if glossary is not None else language.glossary(prayer.title, source_text)
     glossary_left = [f"{item['term']} — {item['definition']}" for item in glossary]
-    glossary_guides = language.pronunciations(glossary_left)
+    glossary_guides = glossary_guides if glossary_guides is not None else language.pronunciations(glossary_left)
     rendered.append('<section class="learner-glossary"><h2>Words in this prayer</h2>')
     rendered.extend(
         learner_row_html(left, glossary_guides[left], glossary=True)
@@ -3733,12 +3817,38 @@ def write_english_breviary(
 def prepare_english_learner_bodies(
     day_sites: list[EnglishDaySite], language: LearnerLanguage
 ) -> dict[str, dict[str, str]]:
-    learner_bodies: dict[str, dict[str, str]] = {}
+    prepared: list[tuple[str, str, Prayer, list[tuple[str, str]], str]] = []
     for site in day_sites:
         date_name = date_dir_name(site.date)
-        learner_bodies[date_name] = {
-            prayer.slug: learner_prayer_body(prayer, language) for prayer in site.prayers
-        }
+        for prayer in site.prayers:
+            units = learner_source_units(prayer.body_html)
+            source_text = " ".join(value for kind, value in units if kind == "sentence")
+            prepared.append((date_name, prayer.slug, prayer, units, source_text))
+
+    source_pronunciations = language.pronunciations(
+        [value for _, _, _, units, _ in prepared for kind, value in units if kind == "sentence"]
+    )
+    glossary_by_prayer = language.glossaries(
+        [(f"{date_name}/{slug}", prayer.title, source_text) for date_name, slug, prayer, _, source_text in prepared]
+    )
+    glossary_lines = [
+        f"{item['term']} — {item['definition']}"
+        for date_name, slug, _, _, _ in prepared
+        for item in glossary_by_prayer[f"{date_name}/{slug}"]
+    ]
+    glossary_pronunciations = language.pronunciations(glossary_lines)
+
+    learner_bodies: dict[str, dict[str, str]] = {}
+    for date_name, slug, prayer, units, _ in prepared:
+        glossary = glossary_by_prayer[f"{date_name}/{slug}"]
+        learner_bodies.setdefault(date_name, {})[slug] = learner_prayer_body(
+            prayer,
+            language,
+            units=units,
+            pronunciations=source_pronunciations,
+            glossary=glossary,
+            glossary_guides=glossary_pronunciations,
+        )
     language.save()
     return learner_bodies
 
