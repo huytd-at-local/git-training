@@ -318,6 +318,9 @@ heading_pages = paginate_learner_html(heading_fixture)
 for number, heading_page in enumerate(heading_pages[:-1]):
     if learner_html_blocks(heading_page)[-1].lstrip().startswith("<h2"):
         raise SystemExit("Learner heading was stranded at the end of a Kindle page")
+wrapped_heading_pages = paginate_learner_html(f"<div>{heading_fixture}</div>")
+if wrapped_heading_pages != heading_pages:
+    raise SystemExit("A neutral learner transport wrapper collapsed Kindle pagination")
 
 test_day = EnglishDaySite(
     datetime(2026, 8, 23),
@@ -468,8 +471,21 @@ with tempfile.TemporaryDirectory() as temporary_dir:
         restored_bodies = restore_english_learner_bodies(
             learner_index.parent, "123456", test_day.date
         )
-        if restored_bodies["2026-08-23"]["morning-prayer"].count("learner-row") != learner_body.count("learner-row"):
+        restored_morning = restored_bodies["2026-08-23"]["morning-prayer"]
+        if restored_morning.count("learner-row") != learner_body.count("learner-row"):
             raise SystemExit("Cached learner re-pagination lost paired rows")
+        original_page_count = len(paginate_learner_html(learner_body))
+        restored_pages = paginate_learner_html(restored_morning)
+        if original_page_count < 2 or len(restored_pages) != original_page_count:
+            raise SystemExit(
+                "Cached learner round trip collapsed a multi-page Office into one page"
+            )
+        if any(
+            learner_page_units(learner_html_blocks(page))
+            > (fetch_module.LEARNER_FIRST_PAGE_TARGET_UNITS if index == 0 else fetch_module.LEARNER_PAGE_TARGET_UNITS)
+            for index, page in enumerate(restored_pages)
+        ):
+            raise SystemExit("Restored learner Office exceeds its Kindle page budget")
         write_english_learner([test_day], "123456", restored_bodies)
         write_english_breviary([test_day], "123456", preserve_learner=True)
         if not learner_index.is_file():

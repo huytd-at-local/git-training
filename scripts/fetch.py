@@ -310,7 +310,7 @@ BREVIARY_CSS = """
       margin-top: 14px;
     }
 """
-BREVIARY_CSS_VERSION = "6"
+BREVIARY_CSS_VERSION = "7"
 
 PAGE_TARGET_UNITS = 17.4
 FIRST_PAGE_TARGET_UNITS = 14.4
@@ -2966,6 +2966,19 @@ def learner_html_blocks(fragment: str) -> list[str]:
     wrapper = soup.find("div")
     if not wrapper:
         return []
+    # Be tolerant of neutral transport wrappers.  Cached/decrypted content
+    # used to acquire one of these and the paginator silently counted that
+    # wrapper as a single, page-sized block.
+    while True:
+        children = [child for child in wrapper.children if isinstance(child, Tag)]
+        if (
+            len(children) == 1
+            and children[0].name == "div"
+            and not children[0].attrs
+        ):
+            wrapper = children[0]
+            continue
+        break
     blocks: list[str] = []
     for child in wrapper.children:
         if isinstance(child, NavigableString):
@@ -3777,7 +3790,11 @@ def learner_body_from_decrypted_pages(plaintext_pages: list[str]) -> str:
         blocks.append("</section>")
     if not blocks:
         raise LearnerLanguageError("Cached learner edition did not contain paired reading rows")
-    return "<div>" + "\n".join(blocks) + "</div>"
+    # Keep the same top-level shape produced by ``learner_prayer_body``.
+    # ``paginate_learner_html`` treats every direct child as one indivisible
+    # Kindle block; an extra wrapper would therefore collapse the entire
+    # Office into a single page.
+    return "\n".join(blocks)
 
 
 def restore_english_learner_bodies(
