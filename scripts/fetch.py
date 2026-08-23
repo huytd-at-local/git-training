@@ -2112,6 +2112,23 @@ def block_units(block_html: str) -> float:
         base_units = max(base_units, verse_units)
         verse_spacing_units = len(verse_lines) * VERSE_LINE_SPACING_UNITS
 
+    # Divine Office represents a hymn stanza as a sequence of plain <div>
+    # elements.  Those elements are block-level on Kindle, but treating the
+    # parent as ordinary prose merges the lines while measuring.  That lets a
+    # page absorb an extra stanza and pushes the fixed bottom navigation below
+    # the viewport.  Vietnamese production pages use verse-line spans instead,
+    # so this only corrects the separate English source shape.
+    stanza_lines = soup.select(".stanza > div")
+    if stanza_lines:
+        stanza_units = 0
+        for stanza_line in stanza_lines:
+            stanza_text = stanza_line.get_text(" ", strip=True)
+            stanza_explicit_lines = (
+                len(stanza_line.find_all("br")) + 1 if stanza_text else 0
+            )
+            stanza_units += max(text_units(stanza_text), stanza_explicit_lines)
+        base_units = max(base_units, stanza_units)
+
     paragraph_spacing_units = 0.0
     for paragraph in soup.find_all("p"):
         classes = set(paragraph.get("class", []))

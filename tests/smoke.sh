@@ -195,6 +195,17 @@ if not block_units(debug_production_verse(14)) < PAGE_TARGET_UNITS:
 if not block_units(debug_production_verse(15)) > PAGE_TARGET_UNITS:
     raise SystemExit("15-line production verse should exceed the calibrated Kindle budget")
 
+divineoffice_stanza = """
+<div class=\"stanza\">
+  <div>God Father, praise and glory</div>
+  <div>Your children come to sing.</div>
+  <div>Goodwill and peace to mankind.</div>
+  <div>The gifts your kingdom brings.</div>
+</div>
+"""
+if block_units(divineoffice_stanza) < 4:
+    raise SystemExit("Divine Office stanza lines must be measured as separate Kindle rows")
+
 # Regression for 2026-08-16 Kinh Sang 19/23: its 17 visible lines were split
 # across seven paragraphs. The old model counted only the lines and ignored
 # 7 x 16px of paragraph margins, leaving the bottom navigation below the
