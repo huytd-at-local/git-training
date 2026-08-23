@@ -174,6 +174,7 @@ from scripts.fetch import (
     learner_prayer_body,
     learner_body_from_decrypted_pages,
     learner_row_html,
+    rebalance_learner_pages,
     page_units,
     prepare_english_learner_bodies,
     paginate_learner_html,
@@ -327,6 +328,18 @@ recovered_wrapped_body = learner_body_from_decrypted_pages(
 )
 if paginate_learner_html(recovered_wrapped_body) != heading_pages:
     raise SystemExit("Learner restore could not recover the deployed one-page cache")
+
+# Rebalancing must not move an end-of-page heading forward and immediately
+# pull it back forever.  The recovered production cache exposed this cycle.
+short_row = learner_row_html("Short line.", "Xót lai-n.")
+oscillation_fixture = [
+    [short_row] * 18,
+    [short_row] * 17 + ["<h2>Psalmody</h2>"],
+    [short_row] * 4,
+]
+rebalanced_fixture = rebalance_learner_pages(oscillation_fixture)
+if not learner_html_blocks(rebalanced_fixture[2][0])[0].lstrip().startswith("<h2"):
+    raise SystemExit("Learner rebalancing did not keep a heading with the following page")
 
 test_day = EnglishDaySite(
     datetime(2026, 8, 23),

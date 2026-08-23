@@ -3038,6 +3038,11 @@ def rebalance_learner_pages(pages: list[list[str]]) -> list[list[str]]:
                 ):
                     pages[index].pop()
                     pages[index + 1].insert(0, heading)
+                    # This page is already above the minimum fill.  Advance
+                    # to the page that received the heading; otherwise the
+                    # generic pull-forward branch below can move the heading
+                    # straight back and oscillate forever.
+                    index += 1
                     continue
             candidate = pages[index + 1][0]
             if current_units + learner_block_units(candidate) <= LEARNER_PAGE_TARGET_UNITS:
