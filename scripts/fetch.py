@@ -310,7 +310,7 @@ BREVIARY_CSS = """
       margin-top: 14px;
     }
 """
-BREVIARY_CSS_VERSION = "8"
+BREVIARY_CSS_VERSION = "9"
 
 PAGE_TARGET_UNITS = 17.4
 FIRST_PAGE_TARGET_UNITS = 14.4
@@ -334,16 +334,28 @@ SPLIT_PARAGRAPH_CHUNK_LINES = 2
 
 # The learner mode is deliberately calibrated independently: a paired row has
 # two narrow reading columns and its height is the taller column, not the sum.
-# Calibrated from Paperwhite 3 captures.  The first implementation estimated
-# only 18/16 characters per line, although the device fits roughly 30/26 at
-# the learner font size.  That made every page stop far too early.  Keep these
-# learner-only settings isolated from the established Vietnamese paginator.
-LEARNER_PAGE_TARGET_UNITS = 26.0
-LEARNER_FIRST_PAGE_TARGET_UNITS = 15.0
-LEARNER_MIN_PAGE_UNITS = 18.0
+# Paperwhite 3 captures on 2026-08-23 show that the first-page 15-unit budget
+# keeps navigation visible, while a 26-unit later-page budget scrolls by about
+# 3-8 rendered lines.  Budget in physical CSS height so a font-size change can
+# no longer leave the paginator using stale line counts.  The later-page 875px
+# content allowance reserves the same bottom navigation/chrome safety space as
+# the established Vietnamese paginator.
+LEARNER_FONT_SIZE_PX = 38.0
+LEARNER_LINE_HEIGHT = 1.28
+LEARNER_LINE_HEIGHT_PX = LEARNER_FONT_SIZE_PX * LEARNER_LINE_HEIGHT
+LEARNER_PAGE_CONTENT_HEIGHT_PX = 875.0
+LEARNER_FIRST_PAGE_CONTENT_HEIGHT_PX = 730.0
+LEARNER_PAGE_TARGET_UNITS = round(
+    LEARNER_PAGE_CONTENT_HEIGHT_PX / LEARNER_LINE_HEIGHT_PX, 1
+)
+LEARNER_FIRST_PAGE_TARGET_UNITS = round(
+    LEARNER_FIRST_PAGE_CONTENT_HEIGHT_PX / LEARNER_LINE_HEIGHT_PX, 1
+)
+LEARNER_MIN_PAGE_UNITS = 14.0
 LEARNER_LEFT_CHARS_PER_LINE = 25
 LEARNER_RIGHT_CHARS_PER_LINE = 22
-LEARNER_ROW_SPACING_UNITS = 0.12
+# Each table-cell has 5px top and bottom padding in the production CSS.
+LEARNER_ROW_SPACING_UNITS = round(10.0 / LEARNER_LINE_HEIGHT_PX, 2)
 LEARNER_MAX_FRAGMENT_CHARS = 92
 # The Gemini free tier currently exposes a 20-requests-per-minute ceiling for
 # this project.  A current-day learner build can contain about 925 distinct

@@ -197,6 +197,12 @@ if Path("site/breviary.css").read_text(encoding="utf-8") != expected_breviary_cs
     raise SystemExit("Committed Breviary CSS drifted from the build-time source")
 if "font-size: 38px;" not in fetch_module.BREVIARY_CSS or "line-height: 1.28;" not in fetch_module.BREVIARY_CSS:
     raise SystemExit("Build-time learner CSS lost the Paperwhite readability calibration")
+if fetch_module.LEARNER_PAGE_TARGET_UNITS != 18.0:
+    raise SystemExit("Learner later-page budget no longer reserves Paperwhite navigation space")
+if fetch_module.LEARNER_FIRST_PAGE_TARGET_UNITS != 15.0:
+    raise SystemExit("Learner first-page budget drifted from the verified Paperwhite capture")
+if fetch_module.LEARNER_ROW_SPACING_UNITS < 0.20:
+    raise SystemExit("Learner page model omitted the table-cell vertical padding")
 
 expected_english_prayers = [
     "Invitatory",
@@ -348,8 +354,8 @@ oscillation_fixture = [
     [short_row] * 4,
 ]
 rebalanced_fixture = rebalance_learner_pages(oscillation_fixture)
-if not learner_html_blocks(rebalanced_fixture[2][0])[0].lstrip().startswith("<h2"):
-    raise SystemExit("Learner rebalancing did not keep a heading with the following page")
+if any(page and page[-1].lstrip().startswith("<h2") for page in rebalanced_fixture[:-1]):
+    raise SystemExit("Learner rebalancing stranded a heading without following content")
 
 test_day = EnglishDaySite(
     datetime(2026, 8, 23),
