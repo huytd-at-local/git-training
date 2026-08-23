@@ -168,6 +168,7 @@ from scripts.fetch import (
     learner_html_blocks,
     learner_page_units,
     learner_prayer_body,
+    learner_row_html,
     page_units,
     prepare_english_learner_bodies,
     paginate_learner_html,
@@ -294,6 +295,24 @@ for number, learner_page in enumerate(learner_pages):
     limit = LEARNER_FIRST_PAGE_TARGET_UNITS if number == 0 else LEARNER_PAGE_TARGET_UNITS
     if learner_page_units(learner_html_blocks(learner_page)) > limit:
         raise SystemExit("Learner page exceeds its independent Kindle fill budget")
+
+# A learner heading must travel with at least its first paired line; otherwise
+# Paperwhite pages can end with a stranded heading and a large blank area.
+heading_fixture = "\n".join(
+    [learner_row_html("First short prayer line.", "FỚT xót prê-ờ lai-n.") for _ in range(14)]
+    + [
+        "<h2>Psalmody</h2>",
+        learner_row_html(
+            "The first line after the heading stays together.",
+            "Đờ fớt lai-n aaf-tờ đờ HE-đing xtêiz tờ-GHE-đờ.",
+        ),
+    ]
+    + [learner_row_html("Another short prayer line.", "Ờ-NA-thờ xót prê-ờ lai-n.") for _ in range(12)]
+)
+heading_pages = paginate_learner_html(heading_fixture)
+for number, heading_page in enumerate(heading_pages[:-1]):
+    if learner_html_blocks(heading_page)[-1].lstrip().startswith("<h2"):
+        raise SystemExit("Learner heading was stranded at the end of a Kindle page")
 
 test_day = EnglishDaySite(
     datetime(2026, 8, 23),

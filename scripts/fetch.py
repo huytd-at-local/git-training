@@ -267,8 +267,7 @@ BREVIARY_CSS = """
       display: table;
       width: 100%;
       table-layout: fixed;
-      margin: 0 0 12px;
-      border-bottom: 1px solid #999;
+      margin: 0;
     }
 
     .learner-page .learner-english,
@@ -276,20 +275,20 @@ BREVIARY_CSS = """
       display: table-cell;
       box-sizing: border-box;
       vertical-align: top;
-      font-size: 28px;
-      line-height: 1.31;
+      font-size: 32px;
+      line-height: 1.34;
       overflow-wrap: break-word;
       word-wrap: break-word;
     }
 
     .learner-page .learner-english {
       width: 56%;
-      padding: 5px 10px 7px 0;
+      padding: 5px 10px 5px 0;
     }
 
     .learner-page .learner-pronunciation {
       width: 44%;
-      padding: 5px 0 7px 10px;
+      padding: 5px 0 5px 10px;
       border-left: 1px solid #8b0000;
       color: #333;
     }
@@ -309,7 +308,7 @@ BREVIARY_CSS = """
       margin-top: 14px;
     }
 """
-BREVIARY_CSS_VERSION = "3"
+BREVIARY_CSS_VERSION = "4"
 
 PAGE_TARGET_UNITS = 17.4
 FIRST_PAGE_TARGET_UNITS = 14.4
@@ -333,14 +332,16 @@ SPLIT_PARAGRAPH_CHUNK_LINES = 2
 
 # The learner mode is deliberately calibrated independently: a paired row has
 # two narrow reading columns and its height is the taller column, not the sum.
-# These are conservative initial values and will be tuned from Paperwhite 3
-# captures without changing the established Vietnamese pagination constants.
-LEARNER_PAGE_TARGET_UNITS = 21.0
-LEARNER_FIRST_PAGE_TARGET_UNITS = 17.0
-LEARNER_MIN_PAGE_UNITS = 14.0
-LEARNER_LEFT_CHARS_PER_LINE = 18
-LEARNER_RIGHT_CHARS_PER_LINE = 16
-LEARNER_ROW_SPACING_UNITS = 0.36
+# Calibrated from Paperwhite 3 captures.  The first implementation estimated
+# only 18/16 characters per line, although the device fits roughly 30/26 at
+# the learner font size.  That made every page stop far too early.  Keep these
+# learner-only settings isolated from the established Vietnamese paginator.
+LEARNER_PAGE_TARGET_UNITS = 23.0
+LEARNER_FIRST_PAGE_TARGET_UNITS = 13.0
+LEARNER_MIN_PAGE_UNITS = 15.0
+LEARNER_LEFT_CHARS_PER_LINE = 30
+LEARNER_RIGHT_CHARS_PER_LINE = 26
+LEARNER_ROW_SPACING_UNITS = 0.12
 LEARNER_MAX_FRAGMENT_CHARS = 92
 # The Gemini free tier currently exposes a 20-requests-per-minute ceiling for
 # this project.  A current-day learner build can contain about 925 distinct
@@ -3010,6 +3011,19 @@ def rebalance_learner_pages(pages: list[list[str]]) -> list[list[str]]:
     while index < len(pages):
         current_units = learner_page_units(pages[index])
         if index < len(pages) - 1 and pages[index + 1]:
+            # Do not leave a section heading alone at the end of a page.  This
+            # is particularly conspicuous in the two-column learner layout.
+            if is_heading_block(pages[index][-1]):
+                heading = pages[index][-1]
+                following = pages[index + 1][0]
+                remaining = learner_page_units(pages[index][:-1])
+                if (
+                    remaining >= LEARNER_MIN_PAGE_UNITS
+                    and learner_page_units([heading, following]) <= LEARNER_PAGE_TARGET_UNITS
+                ):
+                    pages[index].pop()
+                    pages[index + 1].insert(0, heading)
+                    continue
             candidate = pages[index + 1][0]
             if current_units + learner_block_units(candidate) <= LEARNER_PAGE_TARGET_UNITS:
                 pages[index].append(pages[index + 1].pop(0))
@@ -3039,16 +3053,22 @@ def paginate_learner_html(fragment: str) -> list[str]:
     pages: list[list[str]] = []
     current: list[str] = []
     current_units = 0.0
-    for block in blocks:
+    for position, block in enumerate(blocks):
         units = learner_block_units(block)
         target = LEARNER_FIRST_PAGE_TARGET_UNITS if not pages else LEARNER_PAGE_TARGET_UNITS
         if units > target:
             raise LearnerLanguageError("A learner row exceeds the Kindle page budget")
-        if current and is_heading_block(block) and current_units >= MIN_UNITS_BEFORE_HEADING_BREAK:
-            pages.append(current)
-            current = []
-            current_units = 0.0
-            target = LEARNER_PAGE_TARGET_UNITS
+        if current and is_heading_block(block) and position + 1 < len(blocks):
+            # Keep a heading with at least its first following line.  Unlike
+            # the Vietnamese single-column paginator, the learner rows are
+            # short enough that a fixed early-heading threshold made half-full
+            # pages and orphan headings on Paperwhite 3.
+            next_units = learner_block_units(blocks[position + 1])
+            if current_units + units + next_units > target:
+                pages.append(current)
+                current = []
+                current_units = 0.0
+                target = LEARNER_PAGE_TARGET_UNITS
         if current and current_units + units > target:
             pages.append(current)
             current = []
