@@ -242,6 +242,29 @@ class FakeRateLimitedGeminiResponse:
 if gemini_retry_seconds(FakeRateLimitedGeminiResponse()) != 51.5:
     raise SystemExit("Learner retry must respect the longer Gemini quota delay")
 
+class FakeUnavailableGeminiResponse:
+    status_code = 503
+    headers = {}
+    text = "Temporarily overloaded."
+
+    def raise_for_status(self):
+        raise fetch_module.requests.HTTPError("503")
+
+transient_responses = [FakeUnavailableGeminiResponse(), FakeGeminiResponse()]
+transient_delays = []
+original_sleep = fetch_module.time.sleep
+try:
+    fetch_module.requests.post = lambda *_args, **_kwargs: transient_responses.pop(0)
+    fetch_module.time.sleep = transient_delays.append
+    response = LearnerLanguage("test-key", "gemini-test").request_json(
+        "smoke", {"type": "object", "properties": {"items": {"type": "array"}}}, "Use JSON.", {"items": []}
+    )
+finally:
+    fetch_module.requests.post = original_post
+    fetch_module.time.sleep = original_sleep
+if response != {"items": []} or transient_delays != [10]:
+    raise SystemExit("Learner request must retry a temporary Gemini 503")
+
 class FakeLearnerLanguage:
     def pronunciations(self, texts):
         return {text: "PHIÊN-ÂM MẪU." for text in texts}

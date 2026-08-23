@@ -885,10 +885,15 @@ class LearnerLanguage:
                 logging.warning("Gemini %s request failed; retrying in %ss", name, delay)
                 time.sleep(delay)
                 continue
-            if getattr(response, "status_code", None) == 429 and attempt + 1 < LEARNER_MAX_RETRIES:
+            status_code = getattr(response, "status_code", None)
+            if status_code in {429, 500, 502, 503, 504} and attempt + 1 < LEARNER_MAX_RETRIES:
                 delay = gemini_retry_seconds(response)
+                if status_code != 429:
+                    delay = max(delay, min(10 * (2**attempt), LEARNER_MAX_RETRY_SECONDS))
+                issue = "rate-limited" if status_code == 429 else f"temporarily unavailable ({status_code})"
                 logging.warning(
-                    "Gemini rate-limited %s; retrying in %.1fs (%d/%d)",
+                    "Gemini %s %s; retrying in %.1fs (%d/%d)",
+                    issue,
                     name,
                     delay,
                     attempt + 1,
