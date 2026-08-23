@@ -172,6 +172,7 @@ from scripts.fetch import (
     learner_html_blocks,
     learner_page_units,
     learner_prayer_body,
+    learner_body_from_decrypted_pages,
     learner_row_html,
     page_units,
     prepare_english_learner_bodies,
@@ -321,6 +322,11 @@ for number, heading_page in enumerate(heading_pages[:-1]):
 wrapped_heading_pages = paginate_learner_html(f"<div>{heading_fixture}</div>")
 if wrapped_heading_pages != heading_pages:
     raise SystemExit("A neutral learner transport wrapper collapsed Kindle pagination")
+recovered_wrapped_body = learner_body_from_decrypted_pages(
+    [f"<h1>Morning Prayer</h1><div>{heading_fixture}</div><nav>Index</nav>"]
+)
+if paginate_learner_html(recovered_wrapped_body) != heading_pages:
+    raise SystemExit("Learner restore could not recover the deployed one-page cache")
 
 test_day = EnglishDaySite(
     datetime(2026, 8, 23),

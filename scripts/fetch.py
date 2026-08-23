@@ -3773,14 +3773,13 @@ def learner_body_from_decrypted_pages(plaintext_pages: list[str]) -> str:
         wrapper = fragment_soup(plaintext).find("div")
         if wrapper is None:
             continue
-        for child in wrapper.children:
-            if not isinstance(child, Tag):
-                continue
+        # Select only canonical learner content, but at any depth.  This also
+        # repairs the already deployed one-page cache where every row sits
+        # inside an accidental neutral div.
+        for child in wrapper.select("h2, h3, .learner-row"):
             classes = set(child.get("class", []))
             is_row = "learner-row" in classes
             is_heading = child.name in {"h2", "h3"}
-            if not is_row and not is_heading:
-                continue
             if is_heading and normalize_key(child.get_text(" ", strip=True)) == "words in this prayer":
                 if not glossary_open:
                     blocks.append('<section class="learner-glossary">')
