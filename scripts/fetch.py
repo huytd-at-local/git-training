@@ -277,8 +277,8 @@ BREVIARY_CSS = """
       display: table-cell;
       box-sizing: border-box;
       vertical-align: top;
-      font-size: 32px;
-      line-height: 1.34;
+      font-size: 38px;
+      line-height: 1.28;
       overflow-wrap: break-word;
       word-wrap: break-word;
     }
@@ -310,7 +310,7 @@ BREVIARY_CSS = """
       margin-top: 14px;
     }
 """
-BREVIARY_CSS_VERSION = "7"
+BREVIARY_CSS_VERSION = "8"
 
 PAGE_TARGET_UNITS = 17.4
 FIRST_PAGE_TARGET_UNITS = 14.4

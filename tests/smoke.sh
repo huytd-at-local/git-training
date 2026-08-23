@@ -188,6 +188,16 @@ from scripts.fetch import (
     write_english_learner,
 )
 
+expected_breviary_css = (
+    Path("site/style.css").read_text(encoding="utf-8").rstrip()
+    + "\n\n"
+    + fetch_module.BREVIARY_CSS.lstrip()
+)
+if Path("site/breviary.css").read_text(encoding="utf-8") != expected_breviary_css:
+    raise SystemExit("Committed Breviary CSS drifted from the build-time source")
+if "font-size: 38px;" not in fetch_module.BREVIARY_CSS or "line-height: 1.28;" not in fetch_module.BREVIARY_CSS:
+    raise SystemExit("Build-time learner CSS lost the Paperwhite readability calibration")
+
 expected_english_prayers = [
     "Invitatory",
     "Office of Readings",
