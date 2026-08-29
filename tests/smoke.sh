@@ -12,6 +12,9 @@ grep -q '^    needs: build$' .github/workflows/pages.yml
 grep -q 'Restore encrypted English learner edition' .github/workflows/pages.yml
 grep -q 'Seed encrypted learner edition from Pages artifact' .github/workflows/pages.yml
 grep -q 'BREVIARY_REFRESH_LEARNER' .github/workflows/pages.yml
+grep -q 'breviary-learner-language-v3.json' .github/workflows/pages.yml
+grep -q 'breviary-learner-edition-v2-' .github/workflows/pages.yml
+! grep -q 'breviary-learner-language-v2.json' .github/workflows/pages.yml
 grep -q 'actions/upload-pages-artifact@v4' .github/workflows/pages.yml
 grep -q 'actions/deploy-pages@v4' .github/workflows/pages.yml
 grep -q '^  actions: write$' .github/workflows/retry-pages-deployment.yml
@@ -159,7 +162,9 @@ from scripts.fetch import (
     ENGLISH_PRAYERS,
     GEMINI_GENERATE_CONTENT_URL,
     LEARNER_FIRST_PAGE_TARGET_UNITS,
+    LEARNER_IPA_INSTRUCTIONS,
     LEARNER_PAGE_TARGET_UNITS,
+    LEARNER_PROFILE_CLASS,
     PAGE_TARGET_UNITS,
     Prayer,
     block_units,
@@ -170,6 +175,7 @@ from scripts.fetch import (
     gemini_retry_seconds,
     html_blocks,
     learner_html_blocks,
+    learner_edition_profile_matches,
     learner_page_units,
     learner_prayer_body,
     learner_body_from_decrypted_pages,
@@ -180,9 +186,11 @@ from scripts.fetch import (
     paginate_learner_html,
     restore_english_learner_bodies,
     text_units,
+    validate_casual_british_ipa,
     EnglishDaySite,
     LiturgicalDay,
     LearnerLanguage,
+    LearnerLanguageError,
     build_english_breviary,
     write_english_breviary,
     write_english_learner,
@@ -259,6 +267,41 @@ config = gemini_call["json"].get("generationConfig", {})
 if config.get("responseMimeType") != "application/json" or "responseJsonSchema" not in config:
     raise SystemExit("Learner request does not enforce Gemini structured JSON output")
 
+ipa_source = "The IPA is designed to represent those qualities of speech that are part of lexical"
+ipa_example = (
+    "ði ˌaɪ piː ˈeɪ ɪz dɪˈzaɪn tə ˌreprɪˈzent ðəʊz ˈkwɒlətiz əv spiːtʃ "
+    "ðətə ˈpɑːtəv ˈleksɪkəl"
+)
+ipa_request = {}
+ipa_language = LearnerLanguage("test-key", "gemini-test")
+ipa_language.cache = {
+    "pronunciations": {fetch_module.learner_cache_key(ipa_source): "Đờ AI-PI-ÂY"},
+    "glossaries": {},
+}
+ipa_language.save = lambda: None
+
+def fake_ipa_request(name, schema, instructions, payload):
+    ipa_request.update({"name": name, "schema": schema, "instructions": instructions, "payload": payload})
+    return {"items": [{"id": "0", "guide": ipa_example}]}
+
+ipa_language.request_json = fake_ipa_request
+if ipa_language.pronunciations([ipa_source]) != {ipa_source: ipa_example}:
+    raise SystemExit("Learner IPA transcription was not accepted verbatim")
+if ipa_request.get("name") != "casual_british_ipa":
+    raise SystemExit("Learner pronunciation request still uses the legacy profile")
+if ipa_request.get("instructions") != LEARNER_IPA_INSTRUCTIONS:
+    raise SystemExit("Learner IPA request did not use the canonical connected-speech prompt")
+for required in ("weak forms", "linked words", "sound deletion", "without slashes"):
+    if required not in LEARNER_IPA_INSTRUCTIONS:
+        raise SystemExit(f"Learner IPA prompt omitted {required}")
+for invalid_guide in ("Đờ AI-PI-ÂY", "/ði aɪ piː eɪ/", "plain respelling"):
+    try:
+        validate_casual_british_ipa(ipa_source, invalid_guide)
+    except LearnerLanguageError:
+        pass
+    else:
+        raise SystemExit(f"Learner IPA validation accepted invalid output: {invalid_guide}")
+
 class FakeRateLimitedGeminiResponse:
     headers = {"retry-after": "5"}
     text = "Please retry in 51.5s."
@@ -291,7 +334,7 @@ if response != {"items": []} or transient_delays != [10]:
 
 class FakeLearnerLanguage:
     def pronunciations(self, texts):
-        return {text: "PHIÊN-ÂM MẪU." for text in texts}
+        return {text: "fəˈnetɪk ˈsɑːmpəl" for text in texts}
 
     def glossary(self, prayer_title, source_text):
         return [
@@ -311,8 +354,10 @@ learner_body = learner_prayer_body(
 )
 if learner_body.count("learner-row") < 8:
     raise SystemExit("Learner mode must pair each source line and glossary explanation")
-if "Words in this prayer" not in learner_body or "PHIÊN-ÂM MẪU." not in learner_body:
-    raise SystemExit("Learner mode is missing glossary pronunciation output")
+if "Words in this prayer" not in learner_body or "fəˈnetɪk ˈsɑːmpəl" not in learner_body:
+    raise SystemExit("Learner mode is missing glossary IPA output")
+if 'class="learner-pronunciation" lang="en-GB"' not in learner_body or 'lang="vi"' in learner_body:
+    raise SystemExit("Learner IPA column has the wrong language metadata")
 learner_pages = paginate_learner_html(learner_body)
 for number, learner_page in enumerate(learner_pages):
     limit = LEARNER_FIRST_PAGE_TARGET_UNITS if number == 0 else LEARNER_PAGE_TARGET_UNITS
@@ -322,15 +367,15 @@ for number, learner_page in enumerate(learner_pages):
 # A learner heading must travel with at least its first paired line; otherwise
 # Paperwhite pages can end with a stranded heading and a large blank area.
 heading_fixture = "\n".join(
-    [learner_row_html("First short prayer line.", "FỚT xót prê-ờ lai-n.") for _ in range(14)]
+    [learner_row_html("First short prayer line.", "fɜːst ʃɔːt preə laɪn") for _ in range(14)]
     + [
         "<h2>Psalmody</h2>",
         learner_row_html(
             "The first line after the heading stays together.",
-            "Đờ fớt lai-n aaf-tờ đờ HE-đing xtêiz tờ-GHE-đờ.",
+            "ðə fɜːst laɪn ˈɑːftə ðə ˈhedɪŋ steɪz təˈɡeðə",
         ),
     ]
-    + [learner_row_html("Another short prayer line.", "Ờ-NA-thờ xót prê-ờ lai-n.") for _ in range(12)]
+    + [learner_row_html("Another short prayer line.", "əˈnʌðə ʃɔːt preə laɪn") for _ in range(12)]
 )
 heading_pages = paginate_learner_html(heading_fixture)
 for number, heading_page in enumerate(heading_pages[:-1]):
@@ -347,7 +392,7 @@ if paginate_learner_html(recovered_wrapped_body) != heading_pages:
 
 # Rebalancing must not move an end-of-page heading forward and immediately
 # pull it back forever.  The recovered production cache exposed this cycle.
-short_row = learner_row_html("Short line.", "Xót lai-n.")
+short_row = learner_row_html("Short line.", "ʃɔːt laɪn")
 oscillation_fixture = [
     [short_row] * 18,
     [short_row] * 17 + ["<h2>Psalmody</h2>"],
@@ -370,7 +415,7 @@ class BatchLearnerLanguage:
 
     def pronunciations(self, texts):
         self.pronunciation_calls.append(list(texts))
-        return {text: "PHIÊN-ÂM MẪU." for text in texts}
+        return {text: "fəˈnetɪk ˈsɑːmpəl" for text in texts}
 
     def glossaries(self, prayers):
         self.glossary_calls.append(list(prayers))
@@ -444,6 +489,47 @@ if len(today_only_language.glossary_calls) != 1 or len(today_only_language.gloss
 if len(learner_write_sites) != 1 or [site.date for site in learner_write_sites[0]] != [learner_today.date()]:
     raise SystemExit("Learner writer must receive today only")
 
+# A legacy encrypted edition must force one IPA regeneration even on a push;
+# otherwise its Vietnamese-style rows would be silently repackaged forever.
+legacy_profile_language = BatchLearnerLanguage()
+legacy_profile_writes = []
+original_site_dir = fetch_module.SITE_DIR
+try:
+    with tempfile.TemporaryDirectory() as temporary_dir:
+        fetch_module.SITE_DIR = Path(temporary_dir) / "site"
+        legacy_root = fetch_module.SITE_DIR / "breviary" / "en" / "learner"
+        legacy_root.mkdir(parents=True)
+        (legacy_root / "index.html").write_text(
+            '<body class="breviary-page learner-page"></body>', encoding="utf-8"
+        )
+        if learner_edition_profile_matches(legacy_root):
+            raise SystemExit("Legacy learner edition was mistaken for the IPA profile")
+        fetch_module.fetch_english_day = lambda _session, date: learner_sites_by_date[date.date()]
+        fetch_module.LearnerLanguage = lambda _key: legacy_profile_language
+        fetch_module.write_english_breviary = lambda *_args, **_kwargs: None
+        fetch_module.write_english_learner = (
+            lambda sites, _passcode, bodies: legacy_profile_writes.append((sites, bodies))
+        )
+        os.environ[fetch_module.LEARNER_GEMINI_API_KEY_ENV] = "test-key"
+        os.environ[fetch_module.LEARNER_REFRESH_ENV] = "0"
+        build_english_breviary(learner_today, "123456")
+finally:
+    fetch_module.SITE_DIR = original_site_dir
+    fetch_module.fetch_english_day = original_fetch_english_day
+    fetch_module.LearnerLanguage = original_learner_language
+    fetch_module.write_english_breviary = original_write_english_breviary
+    fetch_module.write_english_learner = original_write_english_learner
+    if original_learner_key is None:
+        os.environ.pop(fetch_module.LEARNER_GEMINI_API_KEY_ENV, None)
+    else:
+        os.environ[fetch_module.LEARNER_GEMINI_API_KEY_ENV] = original_learner_key
+    if original_learner_refresh is None:
+        os.environ.pop(fetch_module.LEARNER_REFRESH_ENV, None)
+    else:
+        os.environ[fetch_module.LEARNER_REFRESH_ENV] = original_learner_refresh
+if len(legacy_profile_writes) != 1 or not legacy_profile_language.pronunciation_calls:
+    raise SystemExit("Legacy learner cache did not force a one-time IPA refresh")
+
 # A normal push restores the encrypted learner directory from the Actions
 # cache, repaginates it locally, and must not spend Gemini quota again.
 normal_rebuilds = []
@@ -458,6 +544,10 @@ try:
         }
         write_english_learner([test_day], "123456", learner_bodies)
         preserved_page = learner_root / "index.html"
+        if not learner_edition_profile_matches(learner_root):
+            raise SystemExit("Encrypted learner output omitted its IPA profile marker")
+        if LEARNER_PROFILE_CLASS not in preserved_page.read_text(encoding="utf-8"):
+            raise SystemExit("Learner IPA profile marker is not visible outside ciphertext")
         fetch_module.refresh_preserved_learner_stylesheet(learner_root)
         if f"v={fetch_module.BREVIARY_CSS_VERSION}-encrypted-learner" not in preserved_page.read_text(encoding="utf-8"):
             raise SystemExit("Preserved learner CSS reference was not cache-busted")

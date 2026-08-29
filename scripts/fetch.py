@@ -32,6 +32,8 @@ LEARNER_GEMINI_MODEL_ENV = "BREVIARY_LEARNER_GEMINI_MODEL"
 LEARNER_REFRESH_ENV = "BREVIARY_REFRESH_LEARNER"
 LEARNER_GEMINI_DEFAULT_MODEL = "gemini-3.6-flash"
 GEMINI_GENERATE_CONTENT_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+LEARNER_PRONUNCIATION_PROFILE = "casual-british-ipa-v1"
+LEARNER_PROFILE_CLASS = f"learner-profile-{LEARNER_PRONUNCIATION_PROFILE}"
 TIMEOUT_SECONDS = 30
 ROOT = Path(__file__).resolve().parents[1]
 SITE_DIR = ROOT / "site"
@@ -368,7 +370,22 @@ LEARNER_GUIDANCE_BATCH_SIZE = 150
 LEARNER_GLOSSARY_BATCH_SIZE = 12
 LEARNER_MAX_RETRIES = 3
 LEARNER_MAX_RETRY_SECONDS = 60
-LEARNER_CACHE_FILE = CACHE_DIR / "breviary-learner-language-v2.json"
+LEARNER_CACHE_FILE = CACHE_DIR / "breviary-learner-language-v3.json"
+
+LEARNER_IPA_INSTRUCTIONS = (
+    "Transcribe each English item in casual, contemporary British English using only the "
+    "International Phonetic Alphabet (IPA). Model smooth natural connected speech in a "
+    "standard Southern British/non-rhotic accent: use normal weak forms and reductions, join "
+    "linked words where that makes the connection clear, and show a small amount of ordinary "
+    "sound deletion. Preserve the supplied wording; do not paraphrase or omit content beyond "
+    "natural connected-speech deletion. Use IPA primary and secondary stress marks. Return the "
+    "transcription alone, without slashes, brackets, respelling, translations, explanations, "
+    "labels, markdown, or capital letters. Example: 'The IPA is designed to represent those "
+    "qualities of speech that are part of lexical' becomes 'ði ˌaɪ piː ˈeɪ ɪz dɪˈzaɪn tə "
+    "ˌreprɪˈzent ðəʊz ˈkwɒlətiz əv spiːtʃ ðətə ˈpɑːtəv ˈleksɪkəl'."
+)
+LEARNER_IPA_EVIDENCE = frozenset("ɑɒæʌəɜɛɪʊɔŋθðʃʒɡɹɾʔˈˌː")
+VIETNAMESE_PRONUNCIATION_MARKS = frozenset("\u0300\u0301\u0302\u0303\u0306\u0309\u031b\u0323")
 
 LABEL_PATTERNS = [
     r"^ĐC\b",
@@ -800,6 +817,25 @@ def learner_cache_key(value: str) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
+def validate_casual_british_ipa(source_text: str, guide: str) -> str:
+    """Reject legacy respelling or decorated model output before it reaches Kindle."""
+    value = re.sub(r"\s+", " ", guide).strip()
+    decomposed = unicodedata.normalize("NFD", value)
+    has_vietnamese_spelling = "đ" in value.casefold() or any(
+        mark in VIETNAMESE_PRONUNCIATION_MARKS for mark in decomposed
+    )
+    if (
+        not value
+        or len(value) > 500
+        or any("A" <= character <= "Z" for character in value)
+        or any(character in value for character in "/[]")
+        or has_vietnamese_spelling
+        or not any(character in LEARNER_IPA_EVIDENCE for character in value)
+    ):
+        raise LearnerLanguageError(f"Casual British IPA response is invalid for {source_text!r}")
+    return value
+
+
 def load_learner_language_cache() -> dict[str, dict]:
     empty = {"pronunciations": {}, "glossaries": {}}
     if not LEARNER_CACHE_FILE.exists():
@@ -936,9 +972,12 @@ class LearnerLanguage:
         for text in unique:
             cached = self.cache["pronunciations"].get(learner_cache_key(text))
             if isinstance(cached, str) and cached.strip():
-                result[text] = cached.strip()
-            else:
-                missing.append(text)
+                try:
+                    result[text] = validate_casual_british_ipa(text, cached)
+                    continue
+                except LearnerLanguageError:
+                    logging.warning("Ignoring invalid cached IPA for %r", text)
+            missing.append(text)
 
         schema = {
             "type": "object",
@@ -957,27 +996,25 @@ class LearnerLanguage:
                 }
             },
         }
-        instructions = (
-            "Create a Vietnamese-style pronunciation guide for each English item. "
-            "Aim for natural modern British pronunciation. Use easy Vietnamese-like spelling, "
-            "CAPITAL letters for stressed syllables, and show linking or reduced sounds only "
-            "when helpful. Do not use IPA, grammar notes, translations, labels, markdown, or "
-            "any text other than the pronunciation guide. Keep punctuation natural and concise."
-        )
         for offset in range(0, len(missing), LEARNER_GUIDANCE_BATCH_SIZE):
             batch = missing[offset : offset + LEARNER_GUIDANCE_BATCH_SIZE]
             items = [{"id": str(index), "text": text} for index, text in enumerate(batch)]
-            payload = self.request_json("pronunciation_guides", schema, instructions, {"items": items})
+            payload = self.request_json(
+                "casual_british_ipa", schema, LEARNER_IPA_INSTRUCTIONS, {"items": items}
+            )
             guides = payload.get("items")
             if not isinstance(guides, list):
-                raise LearnerLanguageError("Pronunciation response omitted items")
+                raise LearnerLanguageError("Casual British IPA response omitted items")
             by_id = {item.get("id"): item.get("guide") for item in guides if isinstance(item, dict)}
             for item in items:
                 guide = by_id.get(item["id"])
-                if not isinstance(guide, str) or not guide.strip() or len(guide) > 500:
-                    raise LearnerLanguageError(f"Pronunciation response is invalid for {item['text']!r}")
-                result[item["text"]] = guide.strip()
-                self.cache["pronunciations"][learner_cache_key(item["text"])] = guide.strip()
+                if not isinstance(guide, str):
+                    raise LearnerLanguageError(
+                        f"Casual British IPA response is invalid for {item['text']!r}"
+                    )
+                validated = validate_casual_british_ipa(item["text"], guide)
+                result[item["text"]] = validated
+                self.cache["pronunciations"][learner_cache_key(item["text"])] = validated
                 self.changed = True
             self.save()
         return result
@@ -2915,7 +2952,7 @@ def learner_row_html(english_text: str, pronunciation: str, *, glossary: bool = 
     return (
         f'<section class="{classes}">'
         f'<div class="learner-english"><p>{learner_left_html(english_text)}</p></div>'
-        f'<div class="learner-pronunciation" lang="vi"><p>{html.escape(pronunciation)}</p></div>'
+        f'<div class="learner-pronunciation" lang="en-GB"><p>{html.escape(pronunciation)}</p></div>'
         "</section>"
     )
 
@@ -3485,7 +3522,7 @@ def learner_index_inner(
 {liturgical_day_html(site.liturgical_day)}
 {english_date_nav_html(site.date, available_dates, from_dir)}
 <section class="home-list"><ul>{items}</ul></section>
-<p class="kindle-note">English with Vietnamese-style pronunciation · Source: Divine Office.</p>
+<p class="kindle-note">Casual British IPA for connected speech: weak forms, linking and light sound deletion · Source: Divine Office.</p>
 <p class="mode-switch"><a href="{reading_href}">Reading mode</a></p>
 """)
 
@@ -3747,6 +3784,21 @@ def encrypted_shell_ciphertext(path: Path) -> str:
     if not isinstance(payload, str):
         raise LearnerLanguageError(f"Encrypted learner payload has an unexpected format in {path}")
     return payload
+
+
+def learner_edition_profile_matches(learner_root: Path) -> bool:
+    """Tell current IPA output from an older encrypted pronunciation edition."""
+    index_path = learner_root / "index.html"
+    try:
+        shell = index_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return bool(
+        re.search(
+            rf'class="[^"]*\b{re.escape(LEARNER_PROFILE_CLASS)}\b[^"]*"',
+            shell,
+        )
+    )
 
 
 def decrypt_english_pages(pages: list[dict[str, str]], passcode: str) -> dict[str, str]:
@@ -4194,7 +4246,7 @@ def write_english_learner(
                 unlock_href=str(output["unlock_href"]),
                 first_page=bool(output["first_page"]),
                 session_key=ENGLISH_LEARNER_SESSION_KEY,
-                body_class="learner-page",
+                body_class=f"learner-page {LEARNER_PROFILE_CLASS}",
             ),
             encoding="utf-8",
         )
@@ -4213,10 +4265,20 @@ def build_english_breviary(run_date: datetime, passcode: str) -> None:
         for date in (run_date - timedelta(days=1), run_date, run_date + timedelta(days=1))
     ]
     learner_api_key = os.environ.get(LEARNER_GEMINI_API_KEY_ENV, "")
-    existing_learner = (SITE_DIR / "breviary" / "en" / "learner").is_dir()
-    refresh_learner = os.environ.get(LEARNER_REFRESH_ENV, "").strip() == "1"
+    learner_root = SITE_DIR / "breviary" / "en" / "learner"
+    existing_learner = learner_root.is_dir()
+    learner_profile_current = existing_learner and learner_edition_profile_matches(learner_root)
+    profile_refresh_required = existing_learner and not learner_profile_current
+    refresh_learner = (
+        os.environ.get(LEARNER_REFRESH_ENV, "").strip() == "1" or profile_refresh_required
+    )
     learner_bodies: dict[str, dict[str, str]] | None = None
     learner_sites = [sites[1]]
+    if profile_refresh_required:
+        logging.info(
+            "Encrypted learner profile is stale; refreshing %s",
+            LEARNER_PRONUNCIATION_PROFILE,
+        )
     if refresh_learner and learner_api_key:
         language = LearnerLanguage(learner_api_key)
         # Enrich before touching site/breviary/en so a failed language request
@@ -4226,15 +4288,21 @@ def build_english_breviary(run_date: datetime, passcode: str) -> None:
         # Gemini free-tier request budget, avoids generating three complete
         # days of pronunciation and glossary material on every refresh.
         learner_bodies = prepare_english_learner_bodies(learner_sites, language)
-    elif existing_learner:
+    elif existing_learner and learner_profile_current:
         # A presentation-only deploy must apply new Kindle pagination rather
         # than merely changing the CSS around stale, encrypted page breaks.
         learner_bodies = restore_english_learner_bodies(
-            SITE_DIR / "breviary" / "en" / "learner", passcode, learner_sites[0].date
+            learner_root, passcode, learner_sites[0].date
         )
     elif learner_api_key:
         language = LearnerLanguage(learner_api_key)
         learner_bodies = prepare_english_learner_bodies(learner_sites, language)
+    elif existing_learner:
+        logging.warning(
+            "The encrypted learner edition uses an older pronunciation profile; preserving it "
+            "until %s is configured",
+            LEARNER_GEMINI_API_KEY_ENV,
+        )
     else:
         logging.warning(
             "%s is not configured; preserving the last English learner edition",

@@ -34,19 +34,19 @@ jobs:
       - name: Restore English learner language cache
         uses: actions/cache@v4
         with:
-          path: .cache/breviary-learner-language-v2.json
-          key: breviary-learner-v2-${{ github.run_id }}
+          path: .cache/breviary-learner-language-v3.json
+          key: breviary-learner-v3-${{ github.run_id }}
           restore-keys: |
-            breviary-learner-v2-
+            breviary-learner-v3-
 
       - name: Restore encrypted English learner edition
         id: learner-edition-cache
         uses: actions/cache@v4
         with:
           path: site/breviary/en/learner
-          key: breviary-learner-edition-v1-${{ github.run_id }}
+          key: breviary-learner-edition-v2-${{ github.run_id }}
           restore-keys: |
-            breviary-learner-edition-v1-
+            breviary-learner-edition-v2-
 
       - name: Check whether the learner edition was restored
         id: learner-edition
