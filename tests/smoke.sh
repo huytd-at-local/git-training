@@ -13,7 +13,7 @@ grep -q 'Restore encrypted English learner edition' .github/workflows/pages.yml
 grep -q 'Seed encrypted learner edition from Pages artifact' .github/workflows/pages.yml
 grep -q 'BREVIARY_REFRESH_LEARNER' .github/workflows/pages.yml
 grep -q 'breviary-learner-language-v3.json' .github/workflows/pages.yml
-grep -q 'breviary-learner-edition-v2-' .github/workflows/pages.yml
+grep -q 'breviary-learner-edition-v1-' .github/workflows/pages.yml
 ! grep -q 'breviary-learner-language-v2.json' .github/workflows/pages.yml
 grep -q 'actions/upload-pages-artifact@v4' .github/workflows/pages.yml
 grep -q 'actions/deploy-pages@v4' .github/workflows/pages.yml

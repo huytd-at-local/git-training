@@ -44,9 +44,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: site/breviary/en/learner
-          key: breviary-learner-edition-v2-${{ github.run_id }}
+          key: breviary-learner-edition-v1-${{ github.run_id }}
           restore-keys: |
-            breviary-learner-edition-v2-
+            breviary-learner-edition-v1-
 
       - name: Check whether the learner edition was restored
         id: learner-edition
