@@ -14,6 +14,9 @@ grep -q 'build/previous-pages/breviary/en/index.html' .github/workflows/pages.ym
 grep -q 'cp -R build/previous-pages/breviary/en site/breviary/' .github/workflows/pages.yml
 grep -q 'BREVIARY_REFRESH_LEARNER' .github/workflows/pages.yml
 grep -q 'breviary-learner-language-v3.json' .github/workflows/pages.yml
+grep -q 'breviary-learner-edition-v1-' .github/workflows/pages.yml
+grep -q "artifact.name === 'github-pages' && !artifact.expired" .github/workflows/pages.yml
+grep -q 'retention-days: 7' .github/workflows/pages.yml
 grep -q 'cron: "23 17 \* \* \*"' .github/workflows/pages.yml
 grep -q 'cron: "17 18 \* \* \*"' .github/workflows/pages.yml
 ! grep -q 'breviary-learner-language-v2.json' .github/workflows/pages.yml
