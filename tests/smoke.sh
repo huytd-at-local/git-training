@@ -14,6 +14,7 @@ grep -q 'build/previous-pages/breviary/en/index.html' .github/workflows/pages.ym
 grep -q 'cp -R build/previous-pages/breviary/en site/breviary/' .github/workflows/pages.yml
 grep -q 'BREVIARY_REFRESH_LEARNER' .github/workflows/pages.yml
 grep -q 'breviary-learner-language-v3.json' .github/workflows/pages.yml
+grep -q 'breviary-learner-edition-v2-' .github/workflows/pages.yml
 grep -q 'breviary-learner-edition-v1-' .github/workflows/pages.yml
 grep -q "artifact.name === 'github-pages' && !artifact.expired" .github/workflows/pages.yml
 grep -q 'retention-days: 7' .github/workflows/pages.yml
@@ -77,8 +78,8 @@ grep -q 'LOCKED: Chưa có khóa phiên' site/debug/encrypted-breviary-session-2
 
 if test -d site/breviary/en; then
   test -f site/breviary/en/index.html
-  grep -q 'DIVINE_OFFICE_URL' scripts/fetch.py
-  ! grep -qi 'ibreviary' scripts/fetch.py
+  grep -q 'IBREVIARY_URL' scripts/fetch.py
+  ! grep -qi 'divineoffice.org' scripts/fetch.py
   grep -q 'breviary-en-key-v1' site/breviary/en/index.html
   grep -q 'mode.*ccm' site/breviary/en/index.html
   grep -q 'var CIPHERTEXT = "{\\"iv\\"' site/breviary/en/index.html
@@ -165,7 +166,9 @@ from bs4 import BeautifulSoup
 import scripts.fetch as fetch_module
 from scripts.fetch import (
     ENGLISH_PRAYERS,
+    ENGLISH_SOURCE_PROFILE_CLASS,
     GEMINI_GENERATE_CONTENT_URL,
+    IBREVIARY_URL,
     LEARNER_FIRST_PAGE_TARGET_UNITS,
     LEARNER_IPA_INSTRUCTIONS,
     LEARNER_PAGE_TARGET_UNITS,
@@ -173,6 +176,7 @@ from scripts.fetch import (
     PAGE_TARGET_UNITS,
     Prayer,
     block_units,
+    configure_ibreviary_session,
     debug_production_verse,
     debug_prose,
     debug_verse,
@@ -186,6 +190,8 @@ from scripts.fetch import (
     learner_prayer_body,
     learner_body_from_decrypted_pages,
     learner_row_html,
+    parse_ibreviary_index,
+    parse_ibreviary_prayer,
     rebalance_learner_pages,
     page_units,
     prepare_english_learner_bodies,
@@ -219,17 +225,92 @@ if fetch_module.LEARNER_ROW_SPACING_UNITS < 0.20:
     raise SystemExit("Learner page model omitted the table-cell vertical padding")
 
 expected_english_prayers = [
-    "Invitatory",
     "Office of Readings",
     "Morning Prayer",
-    "Midmorning Prayer",
-    "Midday Prayer",
-    "Midafternoon Prayer",
+    "Daytime Prayers",
     "Evening Prayer",
     "Night Prayer",
 ]
 if [title for title, _ in ENGLISH_PRAYERS] != expected_english_prayers:
-    raise SystemExit("English Breviary menu no longer matches the Divine Office hours")
+    raise SystemExit("English Breviary menu no longer matches the five iBreviary hours")
+
+ibreviary_index_fixture = """
+<div id="contenuto"><div class="inner">
+  <h1>Breviary</h1>
+  <p>Sunday, 30 August 2026</p>
+  <p>Twenty-Second Sunday in Ordinary Time</p>
+  <p>Tipo: Festivo - Tempo: Ordinario</p>
+  <p><a href="/m2/breviario.php?s=ufficio_delle_letture">Office of Readings</a></p>
+  <p><a href="/m2/breviario.php?s=lodi">Morning Prayer</a></p>
+  <p><a href="/m2/breviario.php?s=ora_media">Daytime Prayers</a></p>
+  <p><a href="/m2/breviario.php?s=vespri">Evening Prayer</a></p>
+  <p><a href="/m2/breviario.php?s=compieta">Night Prayer</a></p>
+</div></div>
+"""
+ibreviary_hrefs, ibreviary_day = parse_ibreviary_index(
+    ibreviary_index_fixture, datetime(2026, 8, 30)
+)
+if list(ibreviary_hrefs) != expected_english_prayers:
+    raise SystemExit("iBreviary index parser changed the five-hour order")
+if not all(value.startswith(IBREVIARY_URL) for value in ibreviary_hrefs.values()):
+    raise SystemExit("iBreviary index parser did not normalize prayer URLs")
+if ibreviary_day.title != "Twenty-Second Sunday in Ordinary Time":
+    raise SystemExit("iBreviary index parser lost the liturgical day")
+try:
+    parse_ibreviary_index(ibreviary_index_fixture, datetime(2026, 8, 29))
+except ValueError as error:
+    if "date mismatch" not in str(error):
+        raise
+else:
+    raise SystemExit("iBreviary index parser accepted content for the wrong date")
+
+class FakeIBreviaryResponse:
+    def raise_for_status(self):
+        return None
+
+class FakeIBreviarySession:
+    def __init__(self):
+        self.posts = []
+
+    def post(self, url, **kwargs):
+        self.posts.append((url, kwargs))
+        return FakeIBreviaryResponse()
+
+fake_ibreviary_session = FakeIBreviarySession()
+configure_ibreviary_session(fake_ibreviary_session, datetime(2026, 8, 30))
+posted_url, posted_request = fake_ibreviary_session.posts[0]
+if posted_url != IBREVIARY_URL + "opzioni.php":
+    raise SystemExit("iBreviary date selection used the wrong endpoint")
+if posted_request["data"] != {
+    "lang": "en", "giorno": "30", "mese": "8", "anno": "2026", "ok": "ok"
+}:
+    raise SystemExit("iBreviary date selection lost its English/date session contract")
+
+ibreviary_prayer_fixture = """
+<div id="contenuto"><div class="inner">
+  <h1>Breviary</h1><p><span class="sezione">Daytime Prayers</span></p>
+  <p><span class="capolettera_piccolo">INTRODUCTION</span><br/><br/>
+  God, <span class="rubrica">+</span> come to my assistance.<br/>
+  <span class="rubrica">—</span> Lord, make haste to help me.<br/><br/>
+  """ + ("This is representative prayer text for parser and pagination validation. " * 12) + """
+  </p>
+  <p><span class="capolettera_piccolo">MIDMORNING</span><br/><br/>
+  <span class="rubrica">Psalm 120<br/>Longing for peace</span><br/><br/>Morning reading.</p>
+  <p>******</p><p><a href="https://example.invalid/donate">DONATE</a> to support.</p>
+  <p><span class="capolettera_piccolo">MIDDAY</span><br/><br/>Midday reading.</p>
+  <p><span class="capolettera_piccolo">MIDAFTERNOON</span><br/><br/>Afternoon reading.</p>
+  <p><a href="#menu">- Menu -</a></p>
+</div></div>
+"""
+daytime_fixture = parse_ibreviary_prayer(
+    ibreviary_prayer_fixture, "Daytime Prayers", "daytime-prayers"
+)
+if not all(marker in daytime_fixture.body_html for marker in ("MIDMORNING", "MIDDAY", "MIDAFTERNOON")):
+    raise SystemExit("iBreviary Daytime parser did not retain all three canonical hours")
+if "DONATE" in daytime_fixture.body_html or "href=" in daytime_fixture.body_html:
+    raise SystemExit("iBreviary parser retained source navigation or fundraising links")
+if "<h3>Psalm 120 Longing for peace</h3>" not in daytime_fixture.body_html:
+    raise SystemExit("iBreviary parser lost a psalm heading")
 english_inner = english_prayer_inner(
     type("Prayer", (), {"title": "Morning Prayer"})(),
     None,
@@ -533,6 +614,7 @@ original_fetch_english_day = fetch_module.fetch_english_day
 original_learner_language = fetch_module.LearnerLanguage
 original_write_english_breviary = fetch_module.write_english_breviary
 original_write_english_learner = fetch_module.write_english_learner
+original_write_english_bundle_atomic = fetch_module.write_english_bundle_atomic
 original_learner_key = os.environ.get(fetch_module.LEARNER_GEMINI_API_KEY_ENV)
 original_learner_refresh = os.environ.get(fetch_module.LEARNER_REFRESH_ENV)
 today_only_language = BatchLearnerLanguage()
@@ -540,8 +622,9 @@ learner_write_sites = []
 try:
     fetch_module.fetch_english_day = lambda _session, date: learner_sites_by_date[date.date()]
     fetch_module.LearnerLanguage = lambda _key: today_only_language
-    fetch_module.write_english_breviary = lambda *_args, **_kwargs: None
-    fetch_module.write_english_learner = lambda sites, *_args: learner_write_sites.append(sites)
+    fetch_module.write_english_bundle_atomic = (
+        lambda _sites, learner_sites, _passcode, _bodies: learner_write_sites.append(learner_sites)
+    )
     os.environ[fetch_module.LEARNER_GEMINI_API_KEY_ENV] = "test-key"
     os.environ[fetch_module.LEARNER_REFRESH_ENV] = "1"
     build_english_breviary(learner_today, "123456")
@@ -550,6 +633,7 @@ finally:
     fetch_module.LearnerLanguage = original_learner_language
     fetch_module.write_english_breviary = original_write_english_breviary
     fetch_module.write_english_learner = original_write_english_learner
+    fetch_module.write_english_bundle_atomic = original_write_english_bundle_atomic
     if original_learner_key is None:
         os.environ.pop(fetch_module.LEARNER_GEMINI_API_KEY_ENV, None)
     else:
@@ -580,9 +664,10 @@ try:
             raise SystemExit("Legacy learner edition was mistaken for the IPA profile")
         fetch_module.fetch_english_day = lambda _session, date: learner_sites_by_date[date.date()]
         fetch_module.LearnerLanguage = lambda _key: legacy_profile_language
-        fetch_module.write_english_breviary = lambda *_args, **_kwargs: None
-        fetch_module.write_english_learner = (
-            lambda sites, _passcode, bodies: legacy_profile_writes.append((sites, bodies))
+        fetch_module.write_english_bundle_atomic = (
+            lambda _sites, learner_sites, _passcode, bodies: legacy_profile_writes.append(
+                (learner_sites, bodies)
+            )
         )
         os.environ[fetch_module.LEARNER_GEMINI_API_KEY_ENV] = "test-key"
         os.environ[fetch_module.LEARNER_REFRESH_ENV] = "0"
@@ -593,6 +678,7 @@ finally:
     fetch_module.LearnerLanguage = original_learner_language
     fetch_module.write_english_breviary = original_write_english_breviary
     fetch_module.write_english_learner = original_write_english_learner
+    fetch_module.write_english_bundle_atomic = original_write_english_bundle_atomic
     if original_learner_key is None:
         os.environ.pop(fetch_module.LEARNER_GEMINI_API_KEY_ENV, None)
     else:
@@ -606,8 +692,7 @@ if len(legacy_profile_writes) != 1 or not legacy_profile_language.pronunciation_
 
 # A normal same-day push restores the encrypted learner directory from the last
 # successful Pages artifact, repaginates locally, and spends no Gemini quota.
-normal_rebuilds = []
-repaged_builds = []
+atomic_rebuilds = []
 original_site_dir = fetch_module.SITE_DIR
 try:
     with tempfile.TemporaryDirectory() as temporary_dir:
@@ -626,6 +711,8 @@ try:
             raise SystemExit("Yesterday's learner cache was mistaken for today's Office")
         if LEARNER_PROFILE_CLASS not in preserved_page.read_text(encoding="utf-8"):
             raise SystemExit("Learner IPA profile marker is not visible outside ciphertext")
+        if ENGLISH_SOURCE_PROFILE_CLASS not in preserved_page.read_text(encoding="utf-8"):
+            raise SystemExit("Learner iBreviary five-hour marker is not visible outside ciphertext")
         fetch_module.refresh_preserved_learner_stylesheet(learner_root)
         if f"v={fetch_module.BREVIARY_CSS_VERSION}-encrypted-learner" not in preserved_page.read_text(encoding="utf-8"):
             raise SystemExit("Preserved learner CSS reference was not cache-busted")
@@ -633,8 +720,11 @@ try:
         fetch_module.LearnerLanguage = lambda *_args: (_ for _ in ()).throw(
             SystemExit("A push with a cached learner must not call Gemini")
         )
-        fetch_module.write_english_breviary = lambda *_args, **kwargs: normal_rebuilds.append(kwargs)
-        fetch_module.write_english_learner = lambda sites, _passcode, bodies: repaged_builds.append((sites, bodies))
+        fetch_module.write_english_bundle_atomic = (
+            lambda sites, learner_sites, _passcode, bodies: atomic_rebuilds.append(
+                (sites, learner_sites, bodies)
+            )
+        )
         os.environ[fetch_module.LEARNER_GEMINI_API_KEY_ENV] = "test-key"
         os.environ[fetch_module.LEARNER_REFRESH_ENV] = "0"
         build_english_breviary(learner_today, "123456")
@@ -644,6 +734,7 @@ finally:
     fetch_module.LearnerLanguage = original_learner_language
     fetch_module.write_english_breviary = original_write_english_breviary
     fetch_module.write_english_learner = original_write_english_learner
+    fetch_module.write_english_bundle_atomic = original_write_english_bundle_atomic
     if original_learner_key is None:
         os.environ.pop(fetch_module.LEARNER_GEMINI_API_KEY_ENV, None)
     else:
@@ -652,11 +743,11 @@ finally:
         os.environ.pop(fetch_module.LEARNER_REFRESH_ENV, None)
     else:
         os.environ[fetch_module.LEARNER_REFRESH_ENV] = original_learner_refresh
-if normal_rebuilds != [{"preserve_learner": True, "include_learner_link": True}]:
-    raise SystemExit("A push must retain the old learner until its repaginated replacement is ready")
-if len(repaged_builds) != 1 or [site.date for site in repaged_builds[0][0]] != [learner_today.date()]:
+if len(atomic_rebuilds) != 1:
+    raise SystemExit("A push must replace regular and learner English as one atomic bundle")
+if [site.date for site in atomic_rebuilds[0][1]] != [learner_today.date()]:
     raise SystemExit("A push must repaginate today's cached learner edition")
-if set(repaged_builds[0][1]["2026-08-23"]) != {slug for _, slug in ENGLISH_PRAYERS}:
+if set(atomic_rebuilds[0][2]["2026-08-23"]) != {slug for _, slug in ENGLISH_PRAYERS}:
     raise SystemExit("A push lost cached learner rows while repaginating")
 
 # A learner-only failure must keep the last-known-good encrypted learner while
@@ -670,7 +761,8 @@ try:
         learner_root = fetch_module.SITE_DIR / "breviary" / "en" / "learner"
         learner_root.mkdir(parents=True)
         (learner_root / "index.html").write_text(
-            f'<body class="learner-page {LEARNER_PROFILE_CLASS}"></body>', encoding="utf-8"
+            f'<body class="learner-page {LEARNER_PROFILE_CLASS} {ENGLISH_SOURCE_PROFILE_CLASS}"></body>',
+            encoding="utf-8",
         )
         fetch_module.fetch_english_day = lambda _session, date: learner_sites_by_date[date.date()]
         fetch_module.LearnerLanguage = lambda _key: (_ for _ in ()).throw(
@@ -691,6 +783,7 @@ finally:
     fetch_module.LearnerLanguage = original_learner_language
     fetch_module.write_english_breviary = original_write_english_breviary
     fetch_module.write_english_learner = original_write_english_learner
+    fetch_module.write_english_bundle_atomic = original_write_english_bundle_atomic
     if original_learner_key is None:
         os.environ.pop(fetch_module.LEARNER_GEMINI_API_KEY_ENV, None)
     else:
@@ -704,11 +797,57 @@ if degraded_english_writes != [{"preserve_learner": True, "include_learner_link"
 if unexpected_learner_writes:
     raise SystemExit("A failed learner refresh attempted to replace its last-known-good edition")
 
+# During the source/hour migration, a learner failure must preserve the whole
+# previous English tree rather than publish five regular hours beside eight old
+# learner hours.
+migration_writes = []
+original_site_dir = fetch_module.SITE_DIR
+try:
+    with tempfile.TemporaryDirectory() as temporary_dir:
+        fetch_module.SITE_DIR = Path(temporary_dir) / "site"
+        learner_root = fetch_module.SITE_DIR / "breviary" / "en" / "learner"
+        learner_root.mkdir(parents=True)
+        (learner_root / "index.html").write_text(
+            f'<body class="learner-page {LEARNER_PROFILE_CLASS}"></body>', encoding="utf-8"
+        )
+        fetch_module.fetch_english_day = lambda _session, date: learner_sites_by_date[date.date()]
+        fetch_module.LearnerLanguage = lambda _key: (_ for _ in ()).throw(
+            LearnerLanguageError("synthetic migration learner outage")
+        )
+        fetch_module.write_english_breviary = lambda *_args, **_kwargs: migration_writes.append(True)
+        fetch_module.write_english_bundle_atomic = lambda *_args, **_kwargs: migration_writes.append(True)
+        os.environ[fetch_module.LEARNER_GEMINI_API_KEY_ENV] = "test-key"
+        os.environ[fetch_module.LEARNER_REFRESH_ENV] = "0"
+        try:
+            build_english_breviary(learner_today, "123456")
+        except LearnerLanguageError as error:
+            if "previous source/hour contract" not in str(error):
+                raise
+        else:
+            raise SystemExit("A failed five-hour migration published a mixed English bundle")
+finally:
+    fetch_module.SITE_DIR = original_site_dir
+    fetch_module.fetch_english_day = original_fetch_english_day
+    fetch_module.LearnerLanguage = original_learner_language
+    fetch_module.write_english_breviary = original_write_english_breviary
+    fetch_module.write_english_learner = original_write_english_learner
+    fetch_module.write_english_bundle_atomic = original_write_english_bundle_atomic
+    if original_learner_key is None:
+        os.environ.pop(fetch_module.LEARNER_GEMINI_API_KEY_ENV, None)
+    else:
+        os.environ[fetch_module.LEARNER_GEMINI_API_KEY_ENV] = original_learner_key
+    if original_learner_refresh is None:
+        os.environ.pop(fetch_module.LEARNER_REFRESH_ENV, None)
+    else:
+        os.environ[fetch_module.LEARNER_REFRESH_ENV] = original_learner_refresh
+if migration_writes:
+    raise SystemExit("A failed five-hour migration touched the published English tree")
+
 # A complete English-source failure is optional to the Vietnamese release gate.
 original_build_english_breviary = fetch_module.build_english_breviary
 try:
     fetch_module.build_english_breviary = lambda *_args: (_ for _ in ()).throw(
-        ValueError("synthetic Divine Office outage")
+        ValueError("synthetic iBreviary outage")
     )
     if fetch_module.update_english_breviary_optional(learner_today, "123456"):
         raise SystemExit("An English outage was reported as a successful refresh")
@@ -752,6 +891,38 @@ with tempfile.TemporaryDirectory() as temporary_dir:
         write_english_breviary([test_day], "123456", preserve_learner=True)
         if not learner_index.is_file():
             raise SystemExit("Normal English rebuild removed the learner edition without an API key")
+        fetch_module.write_english_bundle_atomic(
+            [test_day], [test_day], "123456", restored_bodies
+        )
+        english_root = fetch_module.SITE_DIR / "breviary" / "en"
+        fetch_module.validate_encrypted_english_bundle(english_root)
+        for legacy_slug in (
+            "invitatory", "midmorning-prayer", "midday-prayer", "midafternoon-prayer"
+        ):
+            if (english_root / f"{legacy_slug}.html").exists() or (
+                english_root / "learner" / f"{legacy_slug}.html"
+            ).exists():
+                raise SystemExit("Atomic five-hour bundle retained a legacy prayer entrypoint")
+        if ENGLISH_SOURCE_PROFILE_CLASS not in (
+            english_root / "index.html"
+        ).read_text(encoding="utf-8"):
+            raise SystemExit("Regular English shell omitted its iBreviary source marker")
+        decrypted_indexes = []
+        for page_id, index_path in (
+            ("root-index", english_root / "index.html"),
+            ("learner-root-index", english_root / "learner" / "index.html"),
+        ):
+            decrypted = fetch_module.decrypt_english_pages(
+                [{"id": page_id, "ciphertext": fetch_module.encrypted_shell_ciphertext(index_path)}],
+                "123456",
+            )[page_id]
+            decrypted_indexes.append(BeautifulSoup(decrypted, "lxml"))
+        for decrypted_index in decrypted_indexes:
+            titles = [item.get_text(" ", strip=True) for item in decrypted_index.select(".home-list li")]
+            if titles != expected_english_prayers:
+                raise SystemExit(f"Encrypted English index is not exactly five hours: {titles}")
+            if "Source: iBreviary" not in decrypted_index.get_text(" ", strip=True):
+                raise SystemExit("Encrypted English index retained the previous source attribution")
     finally:
         fetch_module.SITE_DIR = original_site_dir
 
@@ -766,7 +937,7 @@ if not block_units(debug_production_verse(14)) < PAGE_TARGET_UNITS:
 if not block_units(debug_production_verse(15)) > PAGE_TARGET_UNITS:
     raise SystemExit("15-line production verse should exceed the calibrated Kindle budget")
 
-divineoffice_stanza = """
+english_source_stanza = """
 <div class=\"stanza\">
   <div>God Father, praise and glory</div>
   <div>Your children come to sing.</div>
@@ -774,8 +945,8 @@ divineoffice_stanza = """
   <div>The gifts your kingdom brings.</div>
 </div>
 """
-if block_units(divineoffice_stanza) < 4:
-    raise SystemExit("Divine Office stanza lines must be measured as separate Kindle rows")
+if block_units(english_source_stanza) < 4:
+    raise SystemExit("English source stanza lines must be measured as separate Kindle rows")
 
 # Regression for 2026-08-16 Kinh Sang 19/23: its 17 visible lines were split
 # across seven paragraphs. The old model counted only the lines and ignored

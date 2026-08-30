@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Iterable
-from urllib.parse import urljoin
+from urllib.parse import parse_qs, urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup, Comment, NavigableString, Tag
@@ -25,7 +25,8 @@ from zoneinfo import ZoneInfo
 
 
 SOURCE_URL = "https://ktcgkpv.org/readings/prayer"
-DIVINE_OFFICE_URL = "https://divineoffice.org/"
+IBREVIARY_URL = "https://www.ibreviary.com/m2/"
+IBREVIARY_OPTIONS_URL = urljoin(IBREVIARY_URL, "opzioni.php")
 ENGLISH_BREVIARY_PASSCODE_ENV = "BREVIARY_EN_PASSCODE"
 LEARNER_GEMINI_API_KEY_ENV = "BREVIARY_LEARNER_GEMINI_API_KEY"
 LEARNER_GEMINI_MODEL_ENV = "BREVIARY_LEARNER_GEMINI_MODEL"
@@ -34,6 +35,8 @@ LEARNER_GEMINI_DEFAULT_MODEL = "gemini-3.6-flash"
 GEMINI_GENERATE_CONTENT_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 LEARNER_PRONUNCIATION_PROFILE = "casual-british-ipa-v1"
 LEARNER_PROFILE_CLASS = f"learner-profile-{LEARNER_PRONUNCIATION_PROFILE}"
+ENGLISH_SOURCE_PROFILE = "ibreviary-five-hours-v1"
+ENGLISH_SOURCE_PROFILE_CLASS = f"english-source-{ENGLISH_SOURCE_PROFILE}"
 TIMEOUT_SECONDS = 30
 ROOT = Path(__file__).resolve().parents[1]
 SITE_DIR = ROOT / "site"
@@ -84,16 +87,14 @@ PRAYERS = [
     ("Kinh Tối", "kinh-toi"),
 ]
 
-ENGLISH_PRAYERS = [
-    ("Invitatory", "invitatory"),
-    ("Office of Readings", "office-of-readings"),
-    ("Morning Prayer", "morning-prayer"),
-    ("Midmorning Prayer", "midmorning-prayer"),
-    ("Midday Prayer", "midday-prayer"),
-    ("Midafternoon Prayer", "midafternoon-prayer"),
-    ("Evening Prayer", "evening-prayer"),
-    ("Night Prayer", "night-prayer"),
+ENGLISH_PRAYER_SOURCES = [
+    ("Office of Readings", "office-of-readings", "ufficio_delle_letture"),
+    ("Morning Prayer", "morning-prayer", "lodi"),
+    ("Daytime Prayers", "daytime-prayers", "ora_media"),
+    ("Evening Prayer", "evening-prayer", "vespri"),
+    ("Night Prayer", "night-prayer", "compieta"),
 ]
+ENGLISH_PRAYERS = [(title, slug) for title, slug, _ in ENGLISH_PRAYER_SOURCES]
 ENGLISH_SESSION_KEY = "breviary-en-key-v1"
 ENGLISH_LEARNER_SESSION_KEY = "breviary-en-learner-key-v1"
 ENCRYPT_HELPER = ROOT / "scripts" / "encrypt_breviary.js"
@@ -570,14 +571,14 @@ def fetch_prayer_json(
     return payload["data"]
 
 
-def divineoffice_request(session: requests.Session, url: str) -> str:
-    logging.info("Fetching Divine Office %s", url)
+def ibreviary_request(session: requests.Session, url: str) -> str:
+    logging.info("Fetching iBreviary %s", url)
     response = session.get(
         url,
         headers={
             "User-Agent": USER_AGENT,
             "Accept": "text/html,application/xhtml+xml",
-            "Referer": DIVINE_OFFICE_URL,
+            "Referer": IBREVIARY_URL,
         },
         timeout=TIMEOUT_SECONDS,
     )
@@ -586,7 +587,29 @@ def divineoffice_request(session: requests.Session, url: str) -> str:
     return response.text
 
 
-def divineoffice_inline_tokens(node, inherited_class: str = "") -> list[str | None]:
+def configure_ibreviary_session(session: requests.Session, date: datetime) -> None:
+    """Select one English liturgical day in an isolated iBreviary session."""
+    logging.info("Selecting iBreviary English date %s", date.strftime("%Y-%m-%d"))
+    response = session.post(
+        IBREVIARY_OPTIONS_URL,
+        data={
+            "lang": "en",
+            "giorno": str(date.day),
+            "mese": str(date.month),
+            "anno": str(date.year),
+            "ok": "ok",
+        },
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml",
+            "Referer": IBREVIARY_OPTIONS_URL,
+        },
+        timeout=TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+
+
+def ibreviary_inline_tokens(node, inherited_class: str = "") -> list[str | None]:
     if isinstance(node, Comment):
         return []
     if isinstance(node, NavigableString):
@@ -606,15 +629,16 @@ def divineoffice_inline_tokens(node, inherited_class: str = "") -> list[str | No
 
     classes = set(node.get("class", []))
     child_class = inherited_class
-    style = str(node.get("style", "")).lower().replace(" ", "")
-    if "color:#ff0000" in style or "color:red" in style:
+    if "capolettera_piccolo" in classes:
+        child_class = "section"
+    elif "rubrica" in classes:
         child_class = "rubric"
-    elif "note" in classes:
+    elif "citazione" in classes:
         child_class = "note"
 
     tokens: list[str | None] = []
     for child in node.children:
-        tokens.extend(divineoffice_inline_tokens(child, child_class))
+        tokens.extend(ibreviary_inline_tokens(child, child_class))
 
     if node.name in {"em", "i", "strong", "b"} and not child_class:
         tag_name = "strong" if node.name in {"strong", "b"} else "em"
@@ -625,35 +649,62 @@ def divineoffice_inline_tokens(node, inherited_class: str = "") -> list[str | No
     return tokens
 
 
-def divineoffice_heading_level(value: str) -> int | None:
+def ibreviary_heading_level(value: str) -> int | None:
     key = normalize_key(value)
     if key in {
+        "introduction",
+        "invitatory",
         "hymn",
         "psalmody",
         "reading",
         "readings",
         "responsory",
+        "te deum",
+        "the holy gospel",
+        "gospel canticle",
         "canticle of zechariah",
         "canticle of mary",
         "intercessions",
+        "the lord s prayer",
         "concluding prayer",
+        "blessing",
         "dismissal",
         "acclamation",
+        "midmorning",
+        "midday",
+        "midafternoon",
     }:
         return 2
-    if key.startswith(("psalm ", "canticle ", "gospel canticle", "reading ")):
+    if key.startswith(
+        (
+            "psalm ",
+            "canticle ",
+            "gospel canticle",
+            "reading ",
+            "first reading",
+            "second reading",
+            "series i ",
+            "series ii ",
+            "series iii ",
+            "at midmorning",
+            "at midday",
+            "at midafternoon",
+        )
+    ):
         return 3
     return None
 
 
-def render_divineoffice_group(lines: list[str]) -> str:
+def render_ibreviary_group(lines: list[str]) -> str:
     joined = " ".join(lines)
     soup = BeautifulSoup(f"<div>{joined}</div>", "lxml")
     wrapper = soup.find("div")
     plain = wrapper.get_text(" ", strip=True) if wrapper else ""
     if not plain:
         return ""
-    heading_level = divineoffice_heading_level(plain) if wrapper and wrapper.select_one(".rubric") else None
+    if wrapper and wrapper.select_one(".section"):
+        return f"<h2>{html.escape(plain)}</h2>"
+    heading_level = ibreviary_heading_level(plain) if wrapper and wrapper.select_one(".rubric") else None
     if heading_level:
         return f"<h{heading_level}>{html.escape(plain)}</h{heading_level}>"
     if len(lines) == 1 and lines[0].lstrip().startswith('<span class="rubric">'):
@@ -663,8 +714,8 @@ def render_divineoffice_group(lines: list[str]) -> str:
     return '<div class="stanza">' + "".join(f"<div>{line}</div>" for line in lines) + "</div>"
 
 
-def render_divineoffice_paragraph(node: Tag) -> list[str]:
-    tokens = divineoffice_inline_tokens(node)
+def render_ibreviary_paragraph(node: Tag) -> list[str]:
+    tokens = ibreviary_inline_tokens(node)
     raw_lines: list[str] = []
     current = ""
     for token in tokens:
@@ -682,91 +733,104 @@ def render_divineoffice_paragraph(node: Tag) -> list[str]:
             group.append(line)
             continue
         if group:
-            block = render_divineoffice_group(group)
+            block = render_ibreviary_group(group)
             if block:
                 rendered.append(block)
             group = []
     if group:
-        block = render_divineoffice_group(group)
+        block = render_ibreviary_group(group)
         if block:
             rendered.append(block)
     return rendered
 
 
-def is_divineoffice_content_paragraph(node: Tag) -> bool:
-    if node.find_parent(["audio", "table", "style", "script"]):
-        return False
-    for parent in [node, *node.parents]:
-        if not isinstance(parent, Tag):
-            continue
-        classes = " ".join(parent.get("class", []))
-        if any(
-            value in classes
-            for value in ("powerpress_player", "table-container", "stc-content-filter", "no-print")
-        ):
-            return False
-    return True
+def is_ibreviary_non_liturgical_paragraph(node: Tag) -> bool:
+    key = normalize_key(node.get_text(" ", strip=True))
+    return (
+        not key
+        or key == "menu"
+        or key.startswith("donate to support")
+        or key.startswith("subscribe ibreviary newsletter")
+    )
 
 
-def parse_divineoffice_prayer(source: str, title: str, slug: str) -> Prayer:
+def parse_ibreviary_prayer(source: str, title: str, slug: str) -> Prayer:
     soup = BeautifulSoup(source, "lxml")
-    intro = soup.select_one(".section-intro.is-prayer")
-    entry = intro.find_next_sibling("div", class_="entry") if isinstance(intro, Tag) else None
+    entry = soup.select_one("#contenuto .inner")
     if not isinstance(entry, Tag):
-        raise ValueError(f"Divine Office prayer content container missing for {title}")
+        raise ValueError(f"iBreviary prayer content container missing for {title}")
+
+    source_title = entry.select_one(":scope > p > .sezione")
+    if not isinstance(source_title, Tag) or normalize_key(source_title.get_text(" ", strip=True)) != normalize_key(title):
+        found = source_title.get_text(" ", strip=True) if isinstance(source_title, Tag) else ""
+        raise ValueError(f"iBreviary prayer title mismatch for {title}: {found!r}")
+    title_paragraph = source_title.find_parent("p")
 
     blocks: list[str] = []
-    started = title == "Invitatory"
-    title_key = normalize_key(title)
-    for node in entry.find_all("p"):
-        if not is_divineoffice_content_paragraph(node):
+    for node in entry.find_all("p", recursive=False):
+        if node is title_paragraph or is_ibreviary_non_liturgical_paragraph(node):
             continue
-        text = node.get_text(" ", strip=True)
-        key = normalize_key(text)
-        if not started:
-            if key.startswith(title_key):
-                started = True
-            continue
-        if key.startswith("please help us bring the liturgy of the hours"):
-            break
-        blocks.extend(render_divineoffice_paragraph(node))
+        blocks.extend(render_ibreviary_paragraph(node))
 
     body_html = "\n".join(block for block in blocks if block.strip())
-    if not started or len(BeautifulSoup(body_html, "lxml").get_text(" ", strip=True)) < 100:
-        raise ValueError(f"Divine Office prayer content missing or too short for {title}")
+    body_text = BeautifulSoup(body_html, "lxml").get_text(" ", strip=True)
+    if len(body_text) < 500:
+        raise ValueError(f"iBreviary prayer content missing or too short for {title}")
+    if title == "Daytime Prayers" and not all(
+        marker in normalize_key(body_text) for marker in ("midmorning", "midday", "midafternoon")
+    ):
+        raise ValueError("iBreviary Daytime Prayers omitted one of its three canonical hours")
     return Prayer(title, slug, body_html)
 
 
-def fetch_english_day(session: requests.Session, date: datetime) -> EnglishDaySite:
-    date_query = date.strftime("%Y%m%d")
-    index_source = divineoffice_request(session, f"{DIVINE_OFFICE_URL}?date={date_query}")
-    index_soup = BeautifulSoup(index_source, "lxml")
+def parse_ibreviary_index(
+    source: str, date: datetime
+) -> tuple[dict[str, str], LiturgicalDay]:
+    index_soup = BeautifulSoup(source, "lxml")
+    entry = index_soup.select_one("#contenuto .inner")
+    if not isinstance(entry, Tag):
+        raise ValueError("iBreviary index content container is missing")
+    paragraphs = entry.find_all("p", recursive=False)
+    if len(paragraphs) < 3:
+        raise ValueError("iBreviary index metadata is incomplete")
+    date_title = paragraphs[0].get_text(" ", strip=True)
+    day_title = paragraphs[1].get_text(" ", strip=True)
+    try:
+        returned_date = datetime.strptime(date_title, "%A, %d %B %Y").date()
+    except ValueError as error:
+        raise ValueError(f"iBreviary returned an unrecognized English date: {date_title!r}") from error
+    if returned_date != date.date():
+        raise ValueError(
+            f"iBreviary date mismatch: requested {date.date().isoformat()}, returned {returned_date.isoformat()}"
+        )
+
     hrefs: dict[str, str] = {}
-    expected_titles = [title for title, _ in ENGLISH_PRAYERS]
-    for link in index_soup.select(".prayers-grid a.prayers-grid-item"):
-        heading = link.find("h3")
-        href = link.get("href")
-        name = heading.get_text(" ", strip=True) if heading else ""
-        if name in expected_titles and href:
-            hrefs[name] = urljoin(DIVINE_OFFICE_URL, href)
-    if set(hrefs) != set(expected_titles):
-        raise ValueError(f"Divine Office prayer menu mismatch: {sorted(hrefs)}")
+    found_titles: list[str] = []
+    expected_sources = {title: source_key for title, _, source_key in ENGLISH_PRAYER_SOURCES}
+    for paragraph in paragraphs[3:]:
+        link = paragraph.find("a", href=True)
+        if not isinstance(link, Tag):
+            continue
+        title = link.get_text(" ", strip=True)
+        found_titles.append(title)
+        source_key = parse_qs(urlparse(str(link["href"])).query).get("s", [""])[0]
+        if title in expected_sources and source_key == expected_sources[title]:
+            hrefs[title] = urljoin(IBREVIARY_URL, str(link["href"]))
+    expected_titles = [title for title, _, _ in ENGLISH_PRAYER_SOURCES]
+    if found_titles != expected_titles or set(hrefs) != set(expected_titles):
+        raise ValueError(f"iBreviary prayer menu mismatch: {found_titles}")
+    return hrefs, LiturgicalDay(day_title, "", "iBreviary", date_title)
+
+
+def fetch_english_day(session: requests.Session, date: datetime) -> EnglishDaySite:
+    configure_ibreviary_session(session, date)
+    index_source = ibreviary_request(session, urljoin(IBREVIARY_URL, "breviario.php"))
+    hrefs, liturgical_day = parse_ibreviary_index(index_source, date)
 
     prayers: list[Prayer] = []
-    date_title = ""
-    day_title = ""
-    for title, slug in ENGLISH_PRAYERS:
-        source = divineoffice_request(session, hrefs[title])
-        source_soup = BeautifulSoup(source, "lxml")
-        if not date_title:
-            date_node = source_soup.select_one(".section-intro.is-prayer .mobile-prayer-date")
-            heading_node = source_soup.select_one(".section-intro.is-prayer .intro-title")
-            date_title = date_node.get_text(" ", strip=True) if date_node else date.strftime("%B %-d")
-            heading = heading_node.get_text(" ", strip=True) if heading_node else ""
-            prefix = f"{title} for "
-            day_title = heading[len(prefix) :] if heading.startswith(prefix) else heading
-        prayers.append(parse_divineoffice_prayer(source, title, slug))
-    liturgical_day = LiturgicalDay(day_title or "Liturgy of the Hours", "", "Divine Office", date_title)
+    for title, slug, _ in ENGLISH_PRAYER_SOURCES:
+        source = ibreviary_request(session, hrefs[title])
+        prayers.append(parse_ibreviary_prayer(source, title, slug))
     return EnglishDaySite(date, prayers, liturgical_day)
 
 
@@ -2624,7 +2688,7 @@ def block_units(block_html: str) -> float:
         base_units = max(base_units, verse_units)
         verse_spacing_units = len(verse_lines) * VERSE_LINE_SPACING_UNITS
 
-    # Divine Office represents a hymn stanza as a sequence of plain <div>
+    # English source stanzas are normalized as sequences of plain <div>
     # elements.  Those elements are block-level on Kindle, but treating the
     # parent as ordinary prose merges the lines while measuring.  That lets a
     # page absorb an extra stanza and pushes the fixed bottom navigation below
@@ -3030,7 +3094,7 @@ def learner_row_html(english_text: str, pronunciation: str, *, glossary: bool = 
 
 
 def learner_source_units(body_html: str) -> list[tuple[str, str]]:
-    """Return ('heading' | 'sentence', HTML/text) units from Divine Office HTML."""
+    """Return ('heading' | 'sentence', HTML/text) units from normalized English HTML."""
     units: list[tuple[str, str]] = []
     for block in html_blocks(body_html):
         soup = fragment_soup(block)
@@ -3572,7 +3636,7 @@ def english_index_inner(
 {liturgical_day_html(site.liturgical_day)}
 {english_date_nav_html(site.date, available_dates, from_dir)}
 <section class="home-list"><ul>{items}</ul></section>
-<p class="kindle-note">For personal reading on Kindle · Source: Divine Office.</p>
+<p class="kindle-note">For personal reading on Kindle · Source: iBreviary.</p>
 {learner_mode_html}
 """)
 
@@ -3594,7 +3658,7 @@ def learner_index_inner(
 {liturgical_day_html(site.liturgical_day)}
 {english_date_nav_html(site.date, available_dates, from_dir)}
 <section class="home-list"><ul>{items}</ul></section>
-<p class="kindle-note">Casual British IPA for connected speech: weak forms, linking and light sound deletion · Source: Divine Office.</p>
+<p class="kindle-note">Casual British IPA for connected speech: weak forms, linking and light sound deletion · Source: iBreviary.</p>
 <p class="mode-switch"><a href="{reading_href}">Reading mode</a></p>
 """)
 
@@ -3859,16 +3923,16 @@ def encrypted_shell_ciphertext(path: Path) -> str:
 
 
 def learner_edition_profile_matches(learner_root: Path) -> bool:
-    """Tell current IPA output from an older encrypted pronunciation edition."""
+    """Tell current source/hour/IPA output from an older encrypted edition."""
     index_path = learner_root / "index.html"
     try:
         shell = index_path.read_text(encoding="utf-8")
     except OSError:
         return False
     return bool(
-        re.search(
-            rf'class="[^"]*\b{re.escape(LEARNER_PROFILE_CLASS)}\b[^"]*"',
-            shell,
+        re.search(rf'class="[^"]*\b{re.escape(LEARNER_PROFILE_CLASS)}\b[^"]*"', shell)
+        and re.search(
+            rf'class="[^"]*\b{re.escape(ENGLISH_SOURCE_PROFILE_CLASS)}\b[^"]*"', shell
         )
     )
 
@@ -3984,8 +4048,9 @@ def write_english_breviary(
     *,
     preserve_learner: bool = False,
     include_learner_link: bool = False,
+    target_root: Path | None = None,
 ) -> None:
-    target_root = SITE_DIR / "breviary" / "en"
+    target_root = target_root or SITE_DIR / "breviary" / "en"
     updated = datetime.now(VN_TZ).strftime("%d/%m/%Y %H:%M Vietnam time")
     available_dates = [site.date for site in day_sites]
     today = day_sites[len(day_sites) // 2]
@@ -4102,7 +4167,7 @@ def write_english_breviary(
     add_site_documents(today, target_root, "root-", False)
 
     ciphertexts = encrypt_english_pages(documents, passcode)
-    temporary = target_root.with_name("en.new")
+    temporary = target_root.with_name(f"{target_root.name}.new")
     if temporary.exists():
         shutil.rmtree(temporary)
     temporary.mkdir(parents=True)
@@ -4117,10 +4182,11 @@ def write_english_breviary(
                 unlock_page=bool(output["unlock_page"]),
                 unlock_href=str(output["unlock_href"]),
                 first_page=bool(output["first_page"]),
+                body_class=ENGLISH_SOURCE_PROFILE_CLASS,
             ),
             encoding="utf-8",
         )
-    learner_hold = target_root.with_name("learner.hold")
+    learner_hold = target_root.with_name(f"{target_root.name}.learner-hold")
     if learner_hold.exists():
         shutil.rmtree(learner_hold)
     if preserve_learner and (target_root / "learner").exists():
@@ -4196,9 +4262,11 @@ def write_english_learner(
     day_sites: list[EnglishDaySite],
     passcode: str,
     learner_bodies: dict[str, dict[str, str]],
+    *,
+    target_root: Path | None = None,
 ) -> None:
     """Write the separate paired-column learner edition after normal English."""
-    target_root = SITE_DIR / "breviary" / "en" / "learner"
+    target_root = target_root or SITE_DIR / "breviary" / "en" / "learner"
     updated = datetime.now(VN_TZ).strftime("%d/%m/%Y %H:%M Vietnam time")
     available_dates = [site.date for site in day_sites]
     today = day_sites[len(day_sites) // 2]
@@ -4307,7 +4375,7 @@ def write_english_learner(
     add_site_documents(today, target_root, "root-", False)
 
     ciphertexts = encrypt_english_pages(documents, passcode)
-    temporary = target_root.with_name("learner.new")
+    temporary = target_root.with_name(f"{target_root.name}.new")
     if temporary.exists():
         shutil.rmtree(temporary)
     temporary.mkdir(parents=True)
@@ -4323,7 +4391,9 @@ def write_english_learner(
                 unlock_href=str(output["unlock_href"]),
                 first_page=bool(output["first_page"]),
                 session_key=ENGLISH_LEARNER_SESSION_KEY,
-                body_class=f"learner-page {LEARNER_PROFILE_CLASS}",
+                body_class=(
+                    f"learner-page {LEARNER_PROFILE_CLASS} {ENGLISH_SOURCE_PROFILE_CLASS}"
+                ),
             ),
             encoding="utf-8",
         )
@@ -4333,12 +4403,75 @@ def write_english_learner(
     logging.info("Generated %d encrypted English learner pages", len(outputs))
 
 
+def validate_encrypted_english_bundle(english_root: Path) -> None:
+    """Reject incomplete or mixed eight/five-hour bundles before publication."""
+    expected_slugs = {slug for _, slug in ENGLISH_PRAYERS}
+    legacy_slugs = {
+        "invitatory",
+        "midmorning-prayer",
+        "midday-prayer",
+        "midafternoon-prayer",
+    }
+    for root in (english_root, english_root / "learner"):
+        if not (root / "index.html").is_file():
+            raise ValueError(f"Encrypted English bundle index is missing in {root}")
+        missing = sorted(slug for slug in expected_slugs if not (root / f"{slug}.html").is_file())
+        if missing:
+            raise ValueError(f"Encrypted English bundle is missing prayer entrypoints: {missing}")
+        leaked = sorted(slug for slug in legacy_slugs if (root / f"{slug}.html").exists())
+        if leaked:
+            raise ValueError(f"Legacy eight-hour prayer files leaked into the new bundle: {leaked}")
+
+
+def write_english_bundle_atomic(
+    sites: list[EnglishDaySite],
+    learner_sites: list[EnglishDaySite],
+    passcode: str,
+    learner_bodies: dict[str, dict[str, str]],
+) -> None:
+    """Build regular and learner editions together, then swap one complete tree."""
+    live_root = SITE_DIR / "breviary" / "en"
+    staging_root = live_root.with_name("en.bundle-new")
+    BUILD_DIR.mkdir(parents=True, exist_ok=True)
+    previous_root = BUILD_DIR / "english-bundle-previous"
+    for path in (staging_root, previous_root):
+        if path.exists():
+            shutil.rmtree(path)
+    try:
+        write_english_breviary(
+            sites,
+            passcode,
+            include_learner_link=True,
+            target_root=staging_root,
+        )
+        write_english_learner(
+            learner_sites,
+            passcode,
+            learner_bodies,
+            target_root=staging_root / "learner",
+        )
+        validate_encrypted_english_bundle(staging_root)
+        if live_root.exists():
+            live_root.rename(previous_root)
+        try:
+            staging_root.rename(live_root)
+        except Exception:
+            if previous_root.exists() and not live_root.exists():
+                previous_root.rename(live_root)
+            raise
+    finally:
+        if staging_root.exists():
+            shutil.rmtree(staging_root)
+    if previous_root.exists():
+        shutil.rmtree(previous_root)
+    logging.info("Published one atomic five-hour English + learner bundle")
+
+
 def build_english_breviary(run_date: datetime, passcode: str) -> None:
     if not re.fullmatch(r"\d{6}", passcode):
         raise ValueError(f"{ENGLISH_BREVIARY_PASSCODE_ENV} must contain exactly six digits")
-    session = requests.Session()
     sites = [
-        fetch_english_day(session, date)
+        fetch_english_day(requests.Session(), date)
         for date in (run_date - timedelta(days=1), run_date, run_date + timedelta(days=1))
     ]
     learner_api_key = os.environ.get(LEARNER_GEMINI_API_KEY_ENV, "")
@@ -4399,22 +4532,20 @@ def build_english_breviary(run_date: datetime, passcode: str) -> None:
         )
         github_actions_warning("English learner refresh degraded", str(error))
         learner_bodies = None
-    write_english_breviary(
-        sites,
-        passcode,
-        # Keep the old learner tree until its complete replacement is ready.
-        # This also makes a failure in write_english_learner atomic.
-        preserve_learner=existing_learner,
-        include_learner_link=learner_bodies is not None or existing_learner,
-    )
+    if profile_refresh_required and learner_bodies is None:
+        raise LearnerLanguageError(
+            "The cached learner edition uses the previous source/hour contract; "
+            "the complete English bundle is being preserved until its five-hour replacement succeeds"
+        )
     if learner_bodies is not None:
-        try:
-            write_english_learner(learner_sites, passcode, learner_bodies)
-        except Exception as error:
-            logging.exception(
-                "English learner write failed; preserving the last successfully deployed learner edition"
-            )
-            github_actions_warning("English learner publish degraded", str(error))
+        write_english_bundle_atomic(sites, learner_sites, passcode, learner_bodies)
+    else:
+        write_english_breviary(
+            sites,
+            passcode,
+            preserve_learner=existing_learner,
+            include_learner_link=existing_learner,
+        )
 
 
 def update_english_breviary_optional(run_date: datetime, passcode: str) -> bool:
