@@ -393,8 +393,31 @@ class FakeRateLimitedGeminiResponse:
     headers = {"retry-after": "5"}
     text = "Please retry in 51.5s."
 
-if gemini_retry_seconds(FakeRateLimitedGeminiResponse()) != 51.5:
-    raise SystemExit("Learner retry must respect the longer Gemini quota delay")
+if gemini_retry_seconds(FakeRateLimitedGeminiResponse()) != 53.5:
+    raise SystemExit("Learner retry must respect the Gemini quota delay plus a safety margin")
+
+# Semantic repairs can push a nominal build above the upstream 20 RPM quota.
+# The client must throttle proactively, not wait for a 429 to discover it.
+rate_limited_language = LearnerLanguage("test-key", "gemini-test")
+rate_limited_language.request_timestamps = [0.0] * fetch_module.LEARNER_REQUESTS_PER_WINDOW
+rate_limit_clock = [30.0]
+rate_limit_delays = []
+rate_limit_original_monotonic = fetch_module.time.monotonic
+rate_limit_original_sleep = fetch_module.time.sleep
+try:
+    fetch_module.time.monotonic = lambda: rate_limit_clock[0]
+
+    def advance_rate_limit_clock(delay):
+        rate_limit_delays.append(delay)
+        rate_limit_clock[0] += delay
+
+    fetch_module.time.sleep = advance_rate_limit_clock
+    rate_limited_language.wait_for_request_slot()
+finally:
+    fetch_module.time.monotonic = rate_limit_original_monotonic
+    fetch_module.time.sleep = rate_limit_original_sleep
+if rate_limit_delays != [32.0] or rate_limited_language.request_timestamps != [62.0]:
+    raise SystemExit("Learner request limiter did not hold the next batch below the quota window")
 
 class FakeUnavailableGeminiResponse:
     status_code = 503

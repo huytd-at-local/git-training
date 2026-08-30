@@ -362,15 +362,16 @@ LEARNER_ROW_SPACING_UNITS = round(10.0 / LEARNER_LINE_HEIGHT_PX, 2)
 LEARNER_MAX_FRAGMENT_CHARS = 92
 # The Gemini free tier currently exposes a 20-requests-per-minute ceiling for
 # this project.  A current-day learner build can contain about 925 distinct
-# source lines.  These limits keep a cold-cache build to nine requests:
-# seven quick pronunciation batches, one glossary batch, and one
-# glossary-guide batch.  A larger 600-line batch exceeded the HTTP response
-# timeout on the free tier, so the request count is intentionally traded for
-# reliable, short individual responses.
+# source lines.  The nominal build stays below that ceiling, but semantic
+# repairs for omitted or invalid items can add requests.  Keep an explicit
+# safety margin so a cold cache cannot burst through the upstream quota.
 LEARNER_GUIDANCE_BATCH_SIZE = 150
 LEARNER_GLOSSARY_BATCH_SIZE = 12
+LEARNER_REQUESTS_PER_WINDOW = 15
+LEARNER_REQUEST_WINDOW_SECONDS = 60.0
+LEARNER_RETRY_SAFETY_SECONDS = 2.0
 LEARNER_MAX_RETRIES = 3
-LEARNER_MAX_RETRY_SECONDS = 60
+LEARNER_MAX_RETRY_SECONDS = 75
 LEARNER_CACHE_FILE = CACHE_DIR / "breviary-learner-language-v3.json"
 
 LEARNER_IPA_INSTRUCTIONS = (
@@ -953,7 +954,13 @@ def gemini_retry_seconds(response: requests.Response) -> float:
     if match:
         candidates.append(float(match.group(1)))
     if candidates:
-        return max(1.0, min(max(candidates), LEARNER_MAX_RETRY_SECONDS))
+        return max(
+            1.0,
+            min(
+                max(candidates) + LEARNER_RETRY_SAFETY_SECONDS,
+                LEARNER_MAX_RETRY_SECONDS,
+            ),
+        )
     return 10.0
 
 
@@ -971,6 +978,7 @@ class LearnerLanguage:
         self.model = model or os.environ.get(LEARNER_GEMINI_MODEL_ENV, LEARNER_GEMINI_DEFAULT_MODEL)
         self.cache = load_learner_language_cache()
         self.changed = False
+        self.request_timestamps: list[float] = []
 
     def save(self) -> None:
         if not self.changed:
@@ -980,6 +988,30 @@ class LearnerLanguage:
             json.dumps(self.cache, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
+        self.changed = False
+
+    def wait_for_request_slot(self) -> None:
+        """Keep model calls safely below the upstream rolling request limit."""
+        while True:
+            now = time.monotonic()
+            cutoff = now - LEARNER_REQUEST_WINDOW_SECONDS
+            self.request_timestamps = [
+                timestamp for timestamp in self.request_timestamps if timestamp > cutoff
+            ]
+            if len(self.request_timestamps) < LEARNER_REQUESTS_PER_WINDOW:
+                self.request_timestamps.append(now)
+                return
+            delay = (
+                self.request_timestamps[0]
+                + LEARNER_REQUEST_WINDOW_SECONDS
+                - now
+                + LEARNER_RETRY_SAFETY_SECONDS
+            )
+            logging.warning(
+                "Gemini request window is full; waiting %.1fs before the next learner batch",
+                delay,
+            )
+            time.sleep(max(1.0, delay))
 
     def request_json(self, name: str, schema: dict, instructions: str, payload: dict) -> dict:
         request_body = {
@@ -992,6 +1024,7 @@ class LearnerLanguage:
             },
         }
         for attempt in range(LEARNER_MAX_RETRIES):
+            self.wait_for_request_slot()
             try:
                 response = requests.post(
                     GEMINI_GENERATE_CONTENT_URL.format(model=self.model),
