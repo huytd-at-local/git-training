@@ -6,7 +6,11 @@ on:
       - main
   workflow_dispatch:
   schedule:
-    - cron: "5 17 * * *"
+    # 00:23 Vietnam time, away from the top-of-hour scheduling surge.
+    - cron: "23 17 * * *"
+    # A second source-only refresh provides bounded recovery if the first
+    # scheduled run is delayed or an upstream service is temporarily down.
+    - cron: "17 18 * * *"
 
 permissions:
   actions: read
@@ -39,27 +43,8 @@ jobs:
           restore-keys: |
             breviary-learner-v3-
 
-      - name: Restore encrypted English learner edition
-        id: learner-edition-cache
-        uses: actions/cache@v4
-        with:
-          path: site/breviary/en/learner
-          key: breviary-learner-edition-v1-${{ github.run_id }}
-          restore-keys: |
-            breviary-learner-edition-v1-
-
-      - name: Check whether the learner edition was restored
-        id: learner-edition
-        run: |
-          if test -f site/breviary/en/learner/index.html; then
-            echo "needs-seed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "needs-seed=true" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Find the previous successful Pages artifact
         id: previous-pages
-        if: steps.learner-edition.outputs.needs-seed == 'true'
         uses: actions/github-script@v7
         with:
           script: |
@@ -72,13 +57,13 @@ jobs:
             });
             const run = response.data.workflow_runs[0];
             if (!run) {
-              core.setFailed('No successful Pages artifact is available to seed the learner edition.');
+              core.warning('No successful Pages artifact is available; using the committed English fallback.');
               return;
             }
             core.setOutput('run-id', String(run.id));
 
-      - name: Seed encrypted learner edition from Pages artifact
-        if: steps.learner-edition.outputs.needs-seed == 'true'
+      - name: Download the last successful Pages artifact
+        if: steps.previous-pages.outputs.run-id != ''
         uses: actions/download-artifact@v4
         with:
           name: github-pages
@@ -86,15 +71,16 @@ jobs:
           github-token: ${{ github.token }}
           path: build/previous-pages-artifact
 
-      - name: Extract preserved learner edition
-        if: steps.learner-edition.outputs.needs-seed == 'true'
+      - name: Seed last-known-good English editions
+        if: steps.previous-pages.outputs.run-id != ''
         run: |
           archive=$(find build/previous-pages-artifact -name artifact.tar -print -quit)
           test -n "$archive"
-          mkdir -p build/previous-pages site/breviary/en
+          mkdir -p build/previous-pages site/breviary
           tar -xf "$archive" -C build/previous-pages
-          test -f build/previous-pages/breviary/en/learner/index.html
-          cp -R build/previous-pages/breviary/en/learner site/breviary/en/
+          test -f build/previous-pages/breviary/en/index.html
+          rm -rf site/breviary/en
+          cp -R build/previous-pages/breviary/en site/breviary/
 
       - name: Generate static site
         run: python scripts/fetch.py
@@ -102,9 +88,9 @@ jobs:
           BREVIARY_EN_PASSCODE: ${{ secrets.BREVIARY_EN_PASSCODE }}
           BREVIARY_LEARNER_GEMINI_API_KEY: ${{ secrets.BREVIARY_LEARNER_GEMINI_API_KEY }}
           BREVIARY_LEARNER_GEMINI_MODEL: gemini-3.6-flash
-          # A push commonly changes only presentation code. Reuse the encrypted
-          # learner edition then; scheduled/manual runs refresh today's guides.
-          BREVIARY_REFRESH_LEARNER: ${{ github.event_name != 'push' && '1' || '0' }}
+          # A push and the bounded backup schedule reuse the encrypted learner
+          # edition. The primary schedule/manual run refreshes today's guides.
+          BREVIARY_REFRESH_LEARNER: ${{ (github.event_name == 'workflow_dispatch' || github.event.schedule == '23 17 * * *') && '1' || '0' }}
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4

@@ -9,11 +9,13 @@ test -f .github/workflows/retry-pages-deployment.yml
 grep -q '^  build:$' .github/workflows/pages.yml
 grep -q '^  deploy:$' .github/workflows/pages.yml
 grep -q '^    needs: build$' .github/workflows/pages.yml
-grep -q 'Restore encrypted English learner edition' .github/workflows/pages.yml
-grep -q 'Seed encrypted learner edition from Pages artifact' .github/workflows/pages.yml
+grep -q 'Seed last-known-good English editions' .github/workflows/pages.yml
+grep -q 'build/previous-pages/breviary/en/index.html' .github/workflows/pages.yml
+grep -q 'cp -R build/previous-pages/breviary/en site/breviary/' .github/workflows/pages.yml
 grep -q 'BREVIARY_REFRESH_LEARNER' .github/workflows/pages.yml
 grep -q 'breviary-learner-language-v3.json' .github/workflows/pages.yml
-grep -q 'breviary-learner-edition-v1-' .github/workflows/pages.yml
+grep -q 'cron: "23 17 \* \* \*"' .github/workflows/pages.yml
+grep -q 'cron: "17 18 \* \* \*"' .github/workflows/pages.yml
 ! grep -q 'breviary-learner-language-v2.json' .github/workflows/pages.yml
 grep -q 'actions/upload-pages-artifact@v4' .github/workflows/pages.yml
 grep -q 'actions/deploy-pages@v4' .github/workflows/pages.yml
@@ -175,6 +177,7 @@ from scripts.fetch import (
     gemini_retry_seconds,
     html_blocks,
     learner_html_blocks,
+    learner_edition_covers_date,
     learner_edition_profile_matches,
     learner_page_units,
     learner_prayer_body,
@@ -331,6 +334,74 @@ finally:
     fetch_module.time.sleep = original_sleep
 if response != {"items": []} or transient_delays != [10]:
     raise SystemExit("Learner request must retry a temporary Gemini 503")
+
+# Structured JSON can still omit a requested ID. Keep valid groups, persist
+# them immediately, and retry only the missing subset.
+repair_terms = [
+    {"term": term, "definition": "a simple word in this prayer"}
+    for term in ("God", "come", "my", "assistance", "haste", "help")
+]
+repair_source = "God, come to my assistance; make haste to help."
+repair_language = LearnerLanguage("test-key", "gemini-test")
+repair_language.cache = {"pronunciations": {}, "glossaries": {}}
+repair_requests = []
+repair_saves = []
+repair_responses = [
+    {"items": [{"id": "morning", "terms": repair_terms}]},
+    {"items": [{"id": "evening", "terms": repair_terms}]},
+]
+
+def fake_repair_request(_name, _schema, _instructions, payload):
+    repair_requests.append([item["id"] for item in payload["items"]])
+    return repair_responses.pop(0)
+
+repair_language.request_json = fake_repair_request
+repair_language.save = lambda: repair_saves.append(
+    len(repair_language.cache["glossaries"])
+)
+repair_delays = []
+try:
+    fetch_module.time.sleep = repair_delays.append
+    repaired = repair_language.glossaries(
+        [
+            ("morning", "Morning Prayer", repair_source),
+            ("evening", "Evening Prayer", repair_source),
+        ]
+    )
+finally:
+    fetch_module.time.sleep = original_sleep
+if set(repaired) != {"morning", "evening"}:
+    raise SystemExit("Learner glossary repair did not recover every requested prayer")
+if repair_requests != [["morning", "evening"], ["evening"]]:
+    raise SystemExit("Learner glossary repair did not retry only the missing ID")
+if not repair_saves or repair_saves[0] != 1 or repair_delays != [1]:
+    raise SystemExit("Learner glossary repair did not persist partial progress before retry")
+
+# IPA batches use the same semantic repair boundary.
+ipa_repair_language = LearnerLanguage("test-key", "gemini-test")
+ipa_repair_language.cache = {"pronunciations": {}, "glossaries": {}}
+ipa_repair_requests = []
+ipa_repair_responses = [
+    {"items": [{"id": "0", "guide": ipa_example}]},
+    {"items": [{"id": "1", "guide": ipa_example}]},
+]
+
+def fake_ipa_repair_request(_name, _schema, _instructions, payload):
+    ipa_repair_requests.append([item["id"] for item in payload["items"]])
+    return ipa_repair_responses.pop(0)
+
+ipa_repair_language.request_json = fake_ipa_repair_request
+ipa_repair_language.save = lambda: None
+ipa_repair_delays = []
+try:
+    fetch_module.time.sleep = ipa_repair_delays.append
+    repaired_ipa = ipa_repair_language.pronunciations([ipa_source, "Lord, make haste to help me."])
+finally:
+    fetch_module.time.sleep = original_sleep
+if len(repaired_ipa) != 2 or ipa_repair_requests != [["0", "1"], ["1"]]:
+    raise SystemExit("Learner IPA repair did not retry only the missing ID")
+if ipa_repair_delays != [1]:
+    raise SystemExit("Learner IPA semantic retry did not use bounded backoff")
 
 class FakeLearnerLanguage:
     def pronunciations(self, texts):
@@ -530,8 +601,8 @@ finally:
 if len(legacy_profile_writes) != 1 or not legacy_profile_language.pronunciation_calls:
     raise SystemExit("Legacy learner cache did not force a one-time IPA refresh")
 
-# A normal push restores the encrypted learner directory from the Actions
-# cache, repaginates it locally, and must not spend Gemini quota again.
+# A normal same-day push restores the encrypted learner directory from the last
+# successful Pages artifact, repaginates locally, and spends no Gemini quota.
 normal_rebuilds = []
 repaged_builds = []
 original_site_dir = fetch_module.SITE_DIR
@@ -546,6 +617,10 @@ try:
         preserved_page = learner_root / "index.html"
         if not learner_edition_profile_matches(learner_root):
             raise SystemExit("Encrypted learner output omitted its IPA profile marker")
+        if not learner_edition_covers_date(learner_root, test_day.date):
+            raise SystemExit("Encrypted learner output did not expose its covered date")
+        if learner_edition_covers_date(learner_root, test_day.date + timedelta(days=1)):
+            raise SystemExit("Yesterday's learner cache was mistaken for today's Office")
         if LEARNER_PROFILE_CLASS not in preserved_page.read_text(encoding="utf-8"):
             raise SystemExit("Learner IPA profile marker is not visible outside ciphertext")
         fetch_module.refresh_preserved_learner_stylesheet(learner_root)
@@ -574,12 +649,71 @@ finally:
         os.environ.pop(fetch_module.LEARNER_REFRESH_ENV, None)
     else:
         os.environ[fetch_module.LEARNER_REFRESH_ENV] = original_learner_refresh
-if normal_rebuilds != [{"preserve_learner": False, "include_learner_link": True}]:
-    raise SystemExit("A push must rebuild normal English around the locally repaginated learner")
+if normal_rebuilds != [{"preserve_learner": True, "include_learner_link": True}]:
+    raise SystemExit("A push must retain the old learner until its repaginated replacement is ready")
 if len(repaged_builds) != 1 or [site.date for site in repaged_builds[0][0]] != [learner_today.date()]:
     raise SystemExit("A push must repaginate today's cached learner edition")
 if set(repaged_builds[0][1]["2026-08-23"]) != {slug for _, slug in ENGLISH_PRAYERS}:
     raise SystemExit("A push lost cached learner rows while repaginating")
+
+# A learner-only failure must keep the last-known-good encrypted learner while
+# allowing the regular English edition to finish.
+degraded_english_writes = []
+unexpected_learner_writes = []
+original_site_dir = fetch_module.SITE_DIR
+try:
+    with tempfile.TemporaryDirectory() as temporary_dir:
+        fetch_module.SITE_DIR = Path(temporary_dir) / "site"
+        learner_root = fetch_module.SITE_DIR / "breviary" / "en" / "learner"
+        learner_root.mkdir(parents=True)
+        (learner_root / "index.html").write_text(
+            f'<body class="learner-page {LEARNER_PROFILE_CLASS}"></body>', encoding="utf-8"
+        )
+        fetch_module.fetch_english_day = lambda _session, date: learner_sites_by_date[date.date()]
+        fetch_module.LearnerLanguage = lambda _key: (_ for _ in ()).throw(
+            LearnerLanguageError("synthetic learner outage")
+        )
+        fetch_module.write_english_breviary = (
+            lambda *_args, **kwargs: degraded_english_writes.append(kwargs)
+        )
+        fetch_module.write_english_learner = (
+            lambda *_args, **_kwargs: unexpected_learner_writes.append(True)
+        )
+        os.environ[fetch_module.LEARNER_GEMINI_API_KEY_ENV] = "test-key"
+        os.environ[fetch_module.LEARNER_REFRESH_ENV] = "1"
+        build_english_breviary(learner_today, "123456")
+finally:
+    fetch_module.SITE_DIR = original_site_dir
+    fetch_module.fetch_english_day = original_fetch_english_day
+    fetch_module.LearnerLanguage = original_learner_language
+    fetch_module.write_english_breviary = original_write_english_breviary
+    fetch_module.write_english_learner = original_write_english_learner
+    if original_learner_key is None:
+        os.environ.pop(fetch_module.LEARNER_GEMINI_API_KEY_ENV, None)
+    else:
+        os.environ[fetch_module.LEARNER_GEMINI_API_KEY_ENV] = original_learner_key
+    if original_learner_refresh is None:
+        os.environ.pop(fetch_module.LEARNER_REFRESH_ENV, None)
+    else:
+        os.environ[fetch_module.LEARNER_REFRESH_ENV] = original_learner_refresh
+if degraded_english_writes != [{"preserve_learner": True, "include_learner_link": True}]:
+    raise SystemExit("A learner outage blocked the regular English edition")
+if unexpected_learner_writes:
+    raise SystemExit("A failed learner refresh attempted to replace its last-known-good edition")
+
+# A complete English-source failure is optional to the Vietnamese release gate.
+original_build_english_breviary = fetch_module.build_english_breviary
+try:
+    fetch_module.build_english_breviary = lambda *_args: (_ for _ in ()).throw(
+        ValueError("synthetic Divine Office outage")
+    )
+    if fetch_module.update_english_breviary_optional(learner_today, "123456"):
+        raise SystemExit("An English outage was reported as a successful refresh")
+    fetch_module.build_english_breviary = lambda *_args: None
+    if not fetch_module.update_english_breviary_optional(learner_today, "123456"):
+        raise SystemExit("A successful optional English refresh was reported as degraded")
+finally:
+    fetch_module.build_english_breviary = original_build_english_breviary
 
 with tempfile.TemporaryDirectory() as temporary_dir:
     original_site_dir = fetch_module.SITE_DIR

@@ -44,11 +44,13 @@ BREVIARY_EN_PASSCODE=123456 .venv/bin/python scripts/fetch.py --english-only
 
 Chế độ học tiếng Anh nằm tại `/breviary/en/learner/`. Nó chỉ được sinh khi có
 thêm `BREVIARY_LEARNER_GEMINI_API_KEY`; Gemini API chỉ chạy lúc build để tạo phiên âm
-kiểu Việt và giải thích từ đơn giản. Kindle chỉ nhận HTML mã hóa đã tạo sẵn,
+IPA Anh-Anh tự nhiên và giải thích từ đơn giản. Kindle chỉ nhận HTML mã hóa đã tạo sẵn,
 không gọi API hay tải tài nguyên ngoài lúc đọc. GitHub Actions giữ cache ngắn
 hạn của kết quả ngôn ngữ để tránh tạo lại các câu lặp. Model mặc định là
-`gemini-3.6-flash`; khi learner secret đã được cấu hình mà Gemini không tạo được
-nội dung, workflow sẽ fail thay vì deploy một website thiếu learner edition.
+`gemini-3.6-flash`. Nếu Gemini trả thiếu một mục, build giữ ngay các mục hợp lệ
+và retry riêng phần còn thiếu. Nếu learner hoặc nguồn Divine Office vẫn lỗi,
+workflow giữ bản English đã deploy thành công gần nhất và tiếp tục publish phần
+tiếng Việt; lỗi phụ vẫn xuất hiện dưới dạng warning trong GitHub Actions.
 
 ## Test
 
