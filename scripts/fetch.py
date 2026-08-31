@@ -355,23 +355,33 @@ BREVIARY_CSS = """
     }
 
     .learner-responsive-page .learner-row {
-      display: grid;
-      grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+      display: table;
       width: 100%;
+      table-layout: fixed;
       margin: 0;
       border-bottom: 1px solid #e1ddd5;
     }
 
     .learner-responsive-page .learner-english,
     .learner-responsive-page .learner-pronunciation {
+      display: table-cell;
+      box-sizing: border-box;
+      vertical-align: top;
       min-width: 0;
-      padding: 9px 12px;
       font-size: clamp(18px, 2vw, 24px);
       line-height: 1.55;
       overflow-wrap: anywhere;
+      word-wrap: break-word;
+    }
+
+    .learner-responsive-page .learner-english {
+      width: 56%;
+      padding: 9px 12px 9px 0;
     }
 
     .learner-responsive-page .learner-pronunciation {
+      width: 44%;
+      padding: 9px 0 9px 12px;
       border-left: 1px solid #8b0000;
       color: #333;
     }
@@ -420,27 +430,22 @@ BREVIARY_CSS = """
         font-size: 19px;
       }
 
-      .learner-responsive-page .learner-row {
-        display: block;
-        padding: 8px 0;
-      }
-
       .learner-responsive-page .learner-english,
       .learner-responsive-page .learner-pronunciation {
-        display: block;
-        width: 100%;
-        padding: 6px 4px;
+        font-size: clamp(16px, 4.4vw, 18px);
+        line-height: 1.48;
+      }
+
+      .learner-responsive-page .learner-english {
+        padding: 7px 7px 7px 0;
       }
 
       .learner-responsive-page .learner-pronunciation {
-        margin-top: 4px;
-        padding-top: 8px;
-        border-top: 1px solid #8b0000;
-        border-left: 0;
+        padding: 7px 0 7px 7px;
       }
     }
 """
-BREVIARY_CSS_VERSION = "10"
+BREVIARY_CSS_VERSION = "11"
 
 PAGE_TARGET_UNITS = 17.4
 FIRST_PAGE_TARGET_UNITS = 14.4

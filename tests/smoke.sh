@@ -226,6 +226,51 @@ if fetch_module.LEARNER_FIRST_PAGE_TARGET_UNITS != 15.0:
 if fetch_module.LEARNER_ROW_SPACING_UNITS < 0.20:
     raise SystemExit("Learner page model omitted the table-cell vertical padding")
 
+responsive_css = fetch_module.BREVIARY_CSS
+responsive_row_rule = re.search(
+    r"\.learner-responsive-page \.learner-row\s*\{([^}]*)\}",
+    responsive_css,
+    re.DOTALL,
+)
+responsive_cells_rule = re.search(
+    r"\.learner-responsive-page \.learner-english,\s*"
+    r"\.learner-responsive-page \.learner-pronunciation\s*\{([^}]*)\}",
+    responsive_css,
+    re.DOTALL,
+)
+responsive_english_rule = re.search(
+    r"\.learner-responsive-page \.learner-english\s*\{([^}]*)\}",
+    responsive_css,
+    re.DOTALL,
+)
+responsive_pronunciation_rules = re.findall(
+    r"\.learner-responsive-page \.learner-pronunciation\s*\{([^}]*)\}",
+    responsive_css,
+    re.DOTALL,
+)
+if not responsive_row_rule or not {
+    "display: table",
+    "table-layout: fixed",
+}.issubset(set(re.findall(r"[a-z-]+:\s*[^;]+", responsive_row_rule.group(1)))):
+    raise SystemExit("Responsive learner lost its fixed two-column row contract")
+if not responsive_cells_rule or "display: table-cell" not in responsive_cells_rule.group(1):
+    raise SystemExit("Responsive learner cells no longer remain side by side")
+if not responsive_english_rule or "width: 56%" not in responsive_english_rule.group(1):
+    raise SystemExit("Responsive learner English column drifted from the Kindle 56/44 contract")
+if not any("width: 44%" in rule for rule in responsive_pronunciation_rules):
+    raise SystemExit("Responsive learner IPA column drifted from the Kindle 56/44 contract")
+if re.search(
+    r"\.learner-responsive-page \.learner-row\s*\{[^}]*display:\s*block",
+    responsive_css,
+    re.DOTALL,
+):
+    raise SystemExit("Responsive learner stacks English and IPA on a narrow viewport")
+if any(
+    "border-left: 0" in rule or "border-top: 1px solid #8b0000" in rule
+    for rule in responsive_pronunciation_rules
+):
+    raise SystemExit("Responsive learner replaced its vertical column divider on mobile")
+
 expected_english_prayers = [
     "Office of Readings",
     "Morning Prayer",
