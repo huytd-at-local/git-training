@@ -293,6 +293,104 @@ p > .body {
   text-decoration: none;
 }
 
+.mode-directory-link {
+  margin: 26px 0 0;
+  padding-top: 18px;
+  border-top: 2px solid #777;
+  text-align: center;
+}
+
+.mode-directory-link a {
+  display: inline-block;
+  padding: 16px 22px;
+  border: 2px solid #777;
+  font-weight: bold;
+  text-decoration: none;
+}
+
+.mode-directory-page {
+  padding: 20px 18px 30px;
+  background: #fbfaf7;
+  font-size: 24px;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+.mode-directory-page main {
+  max-width: 820px;
+}
+
+.mode-directory-page h1 {
+  font-size: 42px;
+}
+
+.mode-directory-page h2 {
+  margin: 28px 0 10px;
+  font-size: 30px;
+}
+
+.mode-directory-page .updated,
+.mode-directory-page .date-nav {
+  font-size: 18px;
+}
+
+.mode-directory-intro {
+  margin-bottom: 18px;
+  text-align: center;
+  font-size: 20px;
+}
+
+.mode-directory-group ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mode-directory-group li {
+  margin-bottom: 10px;
+}
+
+.mode-directory-group a {
+  display: block;
+  padding: 15px 16px;
+  border: 1px solid #d7d0c5;
+  border-radius: 8px;
+  background: #fff;
+  text-decoration: none;
+}
+
+.mode-directory-group strong,
+.mode-directory-group span {
+  display: block;
+}
+
+.mode-directory-group strong {
+  margin-bottom: 3px;
+  font-size: 24px;
+}
+
+.mode-directory-group span {
+  color: #444;
+  font-size: 18px;
+}
+
+@media (max-width: 640px) {
+  .mode-directory-page {
+    padding: 14px 12px 24px;
+    font-size: 20px;
+  }
+
+  .mode-directory-page h1 {
+    font-size: 32px;
+  }
+
+  .mode-directory-page .date-nav a {
+    width: 30%;
+    min-width: 0;
+    padding: 10px 2px;
+  }
+}
+
 .responsive-page {
   padding: 18px 18px 26px 18px;
   color: #171717;
@@ -811,4 +909,127 @@ code {
 
     .learner-page .learner-glossary h2 {
       margin-top: 14px;
+    }
+
+    /* Modern Learner presentation. Keep these selectors independent from
+       .learner-page so the calibrated Kindle layout cannot leak across. */
+    .learner-responsive-page {
+      padding: 18px 18px 30px;
+      color: #171717;
+      background: #fbfaf7;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 21px;
+      line-height: 1.62;
+      font-weight: 400;
+    }
+
+    .learner-responsive-page main {
+      width: min(100%, 1040px);
+      max-width: 1040px;
+      margin: 0 auto;
+    }
+
+    .learner-responsive-page h1 {
+      font-size: clamp(30px, 5vw, 48px);
+      line-height: 1.18;
+      text-transform: none;
+      letter-spacing: normal;
+    }
+
+    .learner-responsive-page h2 {
+      margin: 34px 0 12px;
+      font-size: clamp(25px, 3.5vw, 36px);
+      line-height: 1.25;
+    }
+
+    .learner-responsive-page h3 {
+      margin: 26px 0 10px;
+      font-size: clamp(22px, 3vw, 30px);
+      line-height: 1.3;
+    }
+
+    .learner-responsive-page .learner-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+      width: 100%;
+      margin: 0;
+      border-bottom: 1px solid #e1ddd5;
+    }
+
+    .learner-responsive-page .learner-english,
+    .learner-responsive-page .learner-pronunciation {
+      min-width: 0;
+      padding: 9px 12px;
+      font-size: clamp(18px, 2vw, 24px);
+      line-height: 1.55;
+      overflow-wrap: anywhere;
+    }
+
+    .learner-responsive-page .learner-pronunciation {
+      border-left: 1px solid #8b0000;
+      color: #333;
+    }
+
+    .learner-responsive-page .learner-english p,
+    .learner-responsive-page .learner-pronunciation p {
+      margin: 0;
+    }
+
+    .learner-responsive-page .learner-glossary {
+      margin-top: 28px;
+      padding-top: 8px;
+      border-top: 1px solid #777;
+    }
+
+    .learner-responsive-page .responsive-nav {
+      display: grid;
+      grid-template-columns: minmax(54px, 1fr) minmax(120px, 1.5fr) minmax(54px, 1fr);
+      gap: 8px;
+      margin-top: 36px;
+      padding-top: 16px;
+      border-top: 1px solid #777;
+      border-bottom: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 18px;
+    }
+
+    .learner-responsive-page .responsive-nav a,
+    .learner-responsive-page .responsive-nav span {
+      display: flex;
+      width: auto;
+      min-width: 0;
+      min-height: 48px;
+      margin: 0;
+      padding: 10px 8px;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid #d7d0c5;
+      border-radius: 7px;
+      background: #fff;
+    }
+
+    @media (max-width: 640px) {
+      .learner-responsive-page {
+        padding: 12px 12px 24px;
+        font-size: 19px;
+      }
+
+      .learner-responsive-page .learner-row {
+        display: block;
+        padding: 8px 0;
+      }
+
+      .learner-responsive-page .learner-english,
+      .learner-responsive-page .learner-pronunciation {
+        display: block;
+        width: 100%;
+        padding: 6px 4px;
+      }
+
+      .learner-responsive-page .learner-pronunciation {
+        margin-top: 4px;
+        padding-top: 8px;
+        border-top: 1px solid #8b0000;
+        border-left: 0;
+      }
     }

@@ -7,6 +7,7 @@ import html
 import json
 import logging
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -35,6 +36,8 @@ LEARNER_GEMINI_DEFAULT_MODEL = "gemini-3.6-flash"
 GEMINI_GENERATE_CONTENT_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 LEARNER_PRONUNCIATION_PROFILE = "casual-british-ipa-v1"
 LEARNER_PROFILE_CLASS = f"learner-profile-{LEARNER_PRONUNCIATION_PROFILE}"
+LEARNER_RESPONSIVE_PROFILE = "learner-responsive-v1"
+LEARNER_RESPONSIVE_PROFILE_CLASS = f"learner-responsive-profile-{LEARNER_RESPONSIVE_PROFILE}"
 ENGLISH_SOURCE_PROFILE = "ibreviary-five-hours-v1"
 ENGLISH_SOURCE_PROFILE_CLASS = f"english-source-{ENGLISH_SOURCE_PROFILE}"
 TIMEOUT_SECONDS = 30
@@ -97,6 +100,7 @@ ENGLISH_PRAYER_SOURCES = [
 ENGLISH_PRAYERS = [(title, slug) for title, slug, _ in ENGLISH_PRAYER_SOURCES]
 ENGLISH_SESSION_KEY = "breviary-en-key-v1"
 ENGLISH_LEARNER_SESSION_KEY = "breviary-en-learner-key-v1"
+ENGLISH_LEARNER_RESPONSIVE_SESSION_KEY = "breviary-en-learner-responsive-key-v1"
 ENCRYPT_HELPER = ROOT / "scripts" / "encrypt_breviary.js"
 DECRYPT_HELPER = ROOT / "scripts" / "decrypt_breviary.js"
 
@@ -312,8 +316,131 @@ BREVIARY_CSS = """
     .learner-page .learner-glossary h2 {
       margin-top: 14px;
     }
+
+    /* Modern Learner presentation. Keep these selectors independent from
+       .learner-page so the calibrated Kindle layout cannot leak across. */
+    .learner-responsive-page {
+      padding: 18px 18px 30px;
+      color: #171717;
+      background: #fbfaf7;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 21px;
+      line-height: 1.62;
+      font-weight: 400;
+    }
+
+    .learner-responsive-page main {
+      width: min(100%, 1040px);
+      max-width: 1040px;
+      margin: 0 auto;
+    }
+
+    .learner-responsive-page h1 {
+      font-size: clamp(30px, 5vw, 48px);
+      line-height: 1.18;
+      text-transform: none;
+      letter-spacing: normal;
+    }
+
+    .learner-responsive-page h2 {
+      margin: 34px 0 12px;
+      font-size: clamp(25px, 3.5vw, 36px);
+      line-height: 1.25;
+    }
+
+    .learner-responsive-page h3 {
+      margin: 26px 0 10px;
+      font-size: clamp(22px, 3vw, 30px);
+      line-height: 1.3;
+    }
+
+    .learner-responsive-page .learner-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+      width: 100%;
+      margin: 0;
+      border-bottom: 1px solid #e1ddd5;
+    }
+
+    .learner-responsive-page .learner-english,
+    .learner-responsive-page .learner-pronunciation {
+      min-width: 0;
+      padding: 9px 12px;
+      font-size: clamp(18px, 2vw, 24px);
+      line-height: 1.55;
+      overflow-wrap: anywhere;
+    }
+
+    .learner-responsive-page .learner-pronunciation {
+      border-left: 1px solid #8b0000;
+      color: #333;
+    }
+
+    .learner-responsive-page .learner-english p,
+    .learner-responsive-page .learner-pronunciation p {
+      margin: 0;
+    }
+
+    .learner-responsive-page .learner-glossary {
+      margin-top: 28px;
+      padding-top: 8px;
+      border-top: 1px solid #777;
+    }
+
+    .learner-responsive-page .responsive-nav {
+      display: grid;
+      grid-template-columns: minmax(54px, 1fr) minmax(120px, 1.5fr) minmax(54px, 1fr);
+      gap: 8px;
+      margin-top: 36px;
+      padding-top: 16px;
+      border-top: 1px solid #777;
+      border-bottom: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 18px;
+    }
+
+    .learner-responsive-page .responsive-nav a,
+    .learner-responsive-page .responsive-nav span {
+      display: flex;
+      width: auto;
+      min-width: 0;
+      min-height: 48px;
+      margin: 0;
+      padding: 10px 8px;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid #d7d0c5;
+      border-radius: 7px;
+      background: #fff;
+    }
+
+    @media (max-width: 640px) {
+      .learner-responsive-page {
+        padding: 12px 12px 24px;
+        font-size: 19px;
+      }
+
+      .learner-responsive-page .learner-row {
+        display: block;
+        padding: 8px 0;
+      }
+
+      .learner-responsive-page .learner-english,
+      .learner-responsive-page .learner-pronunciation {
+        display: block;
+        width: 100%;
+        padding: 6px 4px;
+      }
+
+      .learner-responsive-page .learner-pronunciation {
+        margin-top: 4px;
+        padding-top: 8px;
+        border-top: 1px solid #8b0000;
+        border-left: 0;
+      }
+    }
 """
-BREVIARY_CSS_VERSION = "9"
+BREVIARY_CSS_VERSION = "10"
 
 PAGE_TARGET_UNITS = 17.4
 FIRST_PAGE_TARGET_UNITS = 14.4
@@ -498,6 +625,77 @@ class EnglishDaySite:
     date: datetime
     prayers: list[Prayer]
     liturgical_day: LiturgicalDay
+
+
+@dataclass(frozen=True)
+class ReaderMode:
+    key: str
+    section: str
+    label: str
+    description: str
+    root_index: str
+    dated_index: str | None
+
+    def index_path(self, date_name: str | None = None) -> Path:
+        if date_name is None:
+            return SITE_DIR / self.root_index
+        if self.dated_index is None:
+            raise ValueError(f"Reader mode {self.key} has no dated index")
+        return SITE_DIR / self.dated_index.format(date=date_name)
+
+
+def reader_modes() -> tuple[ReaderMode, ...]:
+    """Canonical public reader-mode routes used by hubs and validation."""
+    return (
+        ReaderMode(
+            "vi-kindle",
+            "Tiếng Việt",
+            "Kindle",
+            "Bản phân trang cho trình duyệt Kindle cũ.",
+            "index.html",
+            "{date}/index.html",
+        ),
+        ReaderMode(
+            "vi-responsive",
+            "Tiếng Việt",
+            "Responsive",
+            "Mỗi giờ kinh là một trang hoàn chỉnh cho máy tính và điện thoại.",
+            "index-responsive.html",
+            "{date}/index-responsive.html",
+        ),
+        ReaderMode(
+            "vi-breviary",
+            "Tiếng Việt",
+            "Monastic Breviary",
+            "Bản Kindle phân trang với trình bày Breviary tối giản.",
+            "breviary/index.html",
+            "breviary/{date}/index.html",
+        ),
+        ReaderMode(
+            "en-reading",
+            "English",
+            "Reading",
+            "Five iBreviary hours in the paginated reading edition.",
+            "breviary/en/index.html",
+            "breviary/en/{date}/index.html",
+        ),
+        ReaderMode(
+            "en-learner",
+            "English",
+            "Learner · Kindle",
+            "Paginated English and casual British IPA for Kindle.",
+            "breviary/en/learner/index.html",
+            "breviary/en/learner/{date}/index.html",
+        ),
+        ReaderMode(
+            "en-learner-responsive",
+            "English",
+            "Learner · Responsive",
+            "Complete unpaginated hours for modern computers and phones.",
+            "breviary/en/learner-responsive/index.html",
+            "breviary/en/learner-responsive/{date}/index.html",
+        ),
+    )
 
 
 @dataclass(frozen=True)
@@ -2656,6 +2854,164 @@ def date_dir_name(date: datetime) -> str:
     return date.strftime("%Y-%m-%d")
 
 
+def relative_site_href(from_path: Path, to_path: Path) -> str:
+    """Return a GitHub-Pages-safe relative URL between generated site files."""
+    from_dir = from_path.relative_to(SITE_DIR).parent.as_posix() or "."
+    target = to_path.relative_to(SITE_DIR).as_posix()
+    return posixpath.relpath(target, from_dir)
+
+
+def mode_directory_footer(index_path: Path, hub_path: Path, *, english: bool) -> str:
+    label = "Reading modes" if english else "Chọn chế độ đọc"
+    href = relative_site_href(index_path, hub_path)
+    return (
+        '<p class="mode-directory-link">'
+        f'<a href="{html.escape(href, quote=True)}">{html.escape(label)}</a>'
+        "</p>"
+    )
+
+
+def inject_mode_directory_footer(index_path: Path, hub_path: Path, *, english: bool) -> None:
+    """Add one public mode link without touching an encrypted index payload."""
+    source = index_path.read_text(encoding="utf-8")
+    footer = mode_directory_footer(index_path, hub_path, english=english)
+    footer_pattern = r'<p class="mode-directory-link">.*?</p>'
+    if re.search(footer_pattern, source, flags=re.DOTALL):
+        updated = re.sub(
+            footer_pattern,
+            footer,
+            source,
+            count=1,
+            flags=re.DOTALL,
+        )
+    elif "</main>" in source:
+        updated = source.replace("</main>", f"  {footer}\n  </main>", 1)
+    else:
+        raise ValueError(f"Reader index has no main element: {index_path}")
+    temporary = index_path.with_suffix(".html.new")
+    temporary.write_text(updated, encoding="utf-8")
+    temporary.replace(index_path)
+
+
+def mode_hub_date_nav(
+    hub_path: Path, current_date_name: str, available_date_names: list[str]
+) -> str:
+    items: list[str] = []
+    for date_name in available_date_names:
+        target = SITE_DIR / "modes" / date_name / "index.html"
+        href = relative_site_href(hub_path, target)
+        parsed = datetime.strptime(date_name, "%Y-%m-%d")
+        active = ' class="active"' if date_name == current_date_name else ""
+        items.append(f'<a{active} href="{href}">{parsed.day}/{parsed.month}</a>')
+    return '<nav class="date-nav">' + "".join(items) + "</nav>"
+
+
+def write_mode_hub(
+    hub_path: Path,
+    current_date_name: str,
+    available_date_names: list[str],
+    *,
+    dated: bool,
+) -> None:
+    available_modes: list[ReaderMode] = []
+    for mode in reader_modes():
+        candidate = mode.index_path(current_date_name if dated else None)
+        if candidate.is_file():
+            available_modes.append(mode)
+    groups: list[str] = []
+    for section in ("Tiếng Việt", "English"):
+        entries = []
+        for mode in available_modes:
+            if mode.section != section:
+                continue
+            target = mode.index_path(current_date_name if dated else None)
+            href = relative_site_href(hub_path, target)
+            entries.append(
+                '<li><a href="{}"><strong>{}</strong><span>{}</span></a></li>'.format(
+                    html.escape(href, quote=True),
+                    html.escape(mode.label),
+                    html.escape(mode.description),
+                )
+            )
+        if entries:
+            groups.append(
+                f'<section class="mode-directory-group"><h2>{html.escape(section)}</h2>'
+                f'<ul>{"".join(entries)}</ul></section>'
+            )
+    body = clean_output_html(
+        f"""
+{mode_hub_date_nav(hub_path, current_date_name, available_date_names)}
+<p class="mode-directory-intro">Chọn cách trình bày phù hợp với thiết bị · Choose a reading mode.</p>
+<div class="mode-directory-list">{"".join(groups)}</div>
+"""
+    )
+    hub_path.parent.mkdir(parents=True, exist_ok=True)
+    css_href = relative_site_href(hub_path, SITE_DIR / "style.css")
+    updated = datetime.now(VN_TZ).strftime("%d/%m/%Y %H:%M giờ Việt Nam")
+    hub_path.write_text(
+        page_shell(
+            "Chọn chế độ đọc / Reading modes",
+            body,
+            updated,
+            "",
+            css_href=css_href,
+            bottom_nav="",
+            body_class="mode-directory-page",
+        ),
+        encoding="utf-8",
+    )
+
+
+def finalize_mode_navigation(current_date: datetime) -> None:
+    """Publish date-aware hubs from the final post-fallback site tree."""
+    date_names = sorted(
+        path.name
+        for path in SITE_DIR.iterdir()
+        if path.is_dir() and re.fullmatch(r"\d{4}-\d{2}-\d{2}", path.name)
+    )
+    current_date_name = date_dir_name(current_date)
+    if current_date_name not in date_names:
+        if not date_names:
+            raise ValueError("No dated reader indexes are available for the mode directory")
+        fallback_date = date_names[len(date_names) // 2]
+        logging.warning(
+            "Current mode-hub date %s is unavailable; using retained date %s",
+            current_date_name,
+            fallback_date,
+        )
+        current_date_name = fallback_date
+    hub_root = SITE_DIR / "modes"
+    if hub_root.exists():
+        shutil.rmtree(hub_root)
+    root_hub = hub_root / "index.html"
+    write_mode_hub(root_hub, current_date_name, date_names, dated=False)
+    dated_hubs: dict[str, Path] = {}
+    for date_name in date_names:
+        hub_path = hub_root / date_name / "index.html"
+        write_mode_hub(hub_path, date_name, date_names, dated=True)
+        dated_hubs[date_name] = hub_path
+
+    for mode in reader_modes():
+        root_index = mode.index_path()
+        if root_index.is_file():
+            inject_mode_directory_footer(
+                root_index,
+                root_hub,
+                english=mode.section == "English",
+            )
+        if mode.dated_index is None:
+            continue
+        for date_name, hub_path in dated_hubs.items():
+            dated_index = mode.index_path(date_name)
+            if dated_index.is_file():
+                inject_mode_directory_footer(
+                    dated_index,
+                    hub_path,
+                    english=mode.section == "English",
+                )
+    logging.info("Generated date-aware mode directory with %d date(s)", len(date_names))
+
+
 def day_href(date: datetime, slug: str = "index", page_number: int = 1) -> str:
     filename = "index.html" if slug == "index" else prayer_page_filename(slug, page_number)
     return f"{date_dir_name(date)}/{filename}"
@@ -3696,6 +4052,73 @@ def learner_index_inner(
 """)
 
 
+def learner_responsive_index_inner(
+    site: EnglishDaySite,
+    available_dates: list[datetime],
+    updated: str,
+    from_dir: str,
+) -> str:
+    items = "".join(
+        f'<li><a href="{slug}.html">{html.escape(title)}</a></li>'
+        for title, slug in ENGLISH_PRAYERS
+    )
+    reading_href = "../index.html" if not from_dir else "../../index.html"
+    kindle_href = (
+        "../learner/index.html"
+        if not from_dir
+        else f"../../learner/{from_dir}/index.html"
+    )
+    return clean_output_html(f"""
+<h1>English Breviary</h1>
+<p class="updated">Updated: {html.escape(updated)}</p>
+{liturgical_day_html(site.liturgical_day)}
+{english_date_nav_html(site.date, available_dates, from_dir)}
+<section class="home-list"><ul>{items}</ul></section>
+<p class="kindle-note">Complete unpaginated hours with casual British IPA · Source: iBreviary.</p>
+<p class="mode-switch"><a href="{kindle_href}">Learner · Kindle</a> <a href="{reading_href}">Reading mode</a></p>
+""")
+
+
+def english_responsive_nav_html(
+    previous_prayer: Prayer | None,
+    next_prayer: Prayer | None,
+    index_href: str = "index.html",
+) -> str:
+    previous_item = (
+        f'<a class="nav-icon" href="{previous_prayer.slug}.html">&#9664;</a>'
+        if previous_prayer
+        else '<span class="nav-icon">&#9664;</span>'
+    )
+    next_item = (
+        f'<a class="nav-icon" href="{next_prayer.slug}.html">&#9654;</a>'
+        if next_prayer
+        else '<span class="nav-icon">&#9654;</span>'
+    )
+    return (
+        '<nav class="page-nav responsive-nav">'
+        f"{previous_item}"
+        f'<a class="nav-index" href="{index_href}">Index</a>'
+        f"{next_item}"
+        "</nav>"
+    )
+
+
+def learner_responsive_prayer_inner(
+    prayer: Prayer,
+    liturgical_day: LiturgicalDay,
+    body_html: str,
+    nav: str,
+    updated: str,
+) -> str:
+    return clean_output_html(f"""
+<h1>{html.escape(prayer.title)}</h1>
+<p class="updated">Updated: {html.escape(updated)}</p>
+{liturgical_day_html(liturgical_day)}
+{body_html}
+{nav}
+""")
+
+
 def english_prayer_inner(
     prayer: Prayer,
     liturgical_day: LiturgicalDay,
@@ -3873,6 +4296,7 @@ def english_encrypted_shell(
     first_page: bool = False,
     session_key: str = ENGLISH_SESSION_KEY,
     body_class: str = "",
+    shell_class: str = "breviary-page",
 ) -> str:
     sjcl_source = SJCL_PATH.read_text(encoding="utf-8").strip()
     if unlock_page:
@@ -3892,7 +4316,7 @@ def english_encrypted_shell(
     else:
         gate = '<p id="decrypt-status" class="decrypt-status">Opening...</p>'
         behavior = english_session_script(ciphertext, unlock_href, session_key)
-    classes = "breviary-page breviary-encrypted"
+    classes = f"{shell_class} breviary-encrypted".strip()
     if first_page:
         classes += " breviary-first"
     if body_class:
@@ -4219,17 +4643,20 @@ def write_english_breviary(
             ),
             encoding="utf-8",
         )
-    learner_hold = target_root.with_name(f"{target_root.name}.learner-hold")
-    if learner_hold.exists():
-        shutil.rmtree(learner_hold)
-    if preserve_learner and (target_root / "learner").exists():
-        (target_root / "learner").rename(learner_hold)
+    learner_holds: list[tuple[str, Path]] = []
+    for directory_name in ("learner", "learner-responsive"):
+        hold = target_root.with_name(f"{target_root.name}.{directory_name}-hold")
+        if hold.exists():
+            shutil.rmtree(hold)
+        if preserve_learner and (target_root / directory_name).exists():
+            (target_root / directory_name).rename(hold)
+            learner_holds.append((directory_name, hold))
     if target_root.exists():
         shutil.rmtree(target_root)
     temporary.rename(target_root)
-    if learner_hold.exists():
-        learner_hold.rename(target_root / "learner")
-        refresh_preserved_learner_stylesheet(target_root / "learner")
+    for directory_name, hold in learner_holds:
+        hold.rename(target_root / directory_name)
+        refresh_preserved_learner_stylesheet(target_root / directory_name)
     logging.info("Generated %d encrypted English Breviary pages", len(outputs))
 
 
@@ -4240,12 +4667,11 @@ def refresh_preserved_learner_stylesheet(learner_root: Path) -> None:
     deploys do not call Gemini.  Its outer shell is safe to update: the prayer
     text remains encrypted and untouched.
     """
-    stylesheet = f"breviary.css?v={BREVIARY_CSS_VERSION}-encrypted-learner"
     for page in learner_root.rglob("*.html"):
         original = page.read_text(encoding="utf-8")
         updated = re.sub(
-            r"breviary\.css\?v=\d+-encrypted-learner",
-            stylesheet,
+            r"breviary\.css\?v=\d+(-encrypted-learner(?:-responsive)?)",
+            rf"breviary.css?v={BREVIARY_CSS_VERSION}\1",
             original,
         )
         if updated != original:
@@ -4436,6 +4862,138 @@ def write_english_learner(
     logging.info("Generated %d encrypted English learner pages", len(outputs))
 
 
+def write_english_learner_responsive(
+    day_sites: list[EnglishDaySite],
+    passcode: str,
+    learner_bodies: dict[str, dict[str, str]],
+    *,
+    target_root: Path | None = None,
+) -> None:
+    """Write one complete encrypted document per learner Office for modern screens."""
+    target_root = target_root or SITE_DIR / "breviary" / "en" / "learner-responsive"
+    updated = datetime.now(VN_TZ).strftime("%d/%m/%Y %H:%M Vietnam time")
+    available_dates = [site.date for site in day_sites]
+    today = day_sites[len(day_sites) // 2]
+    documents: list[dict[str, str]] = []
+    outputs: list[dict[str, object]] = []
+
+    def add_document(
+        page_id: str,
+        path: Path,
+        css_href: str,
+        plaintext: str,
+        *,
+        unlock_page: bool = False,
+        unlock_href: str = "index.html",
+        index_page: bool = False,
+    ) -> None:
+        documents.append({"id": page_id, "html": plaintext})
+        outputs.append(
+            {
+                "id": page_id,
+                "path": path,
+                "css_href": css_href,
+                "unlock_page": unlock_page,
+                "unlock_href": unlock_href,
+                "index_page": index_page,
+            }
+        )
+
+    add_document(
+        "learner-responsive-root-index",
+        target_root / "index.html",
+        f"../../../breviary.css?v={BREVIARY_CSS_VERSION}-encrypted-learner-responsive",
+        learner_responsive_index_inner(today, available_dates, updated, ""),
+        unlock_page=True,
+        index_page=True,
+    )
+
+    def add_site_documents(site: EnglishDaySite, target_dir: Path, prefix: str, dated: bool) -> None:
+        date_name = date_dir_name(site.date)
+        css_href = (
+            f"../../../../breviary.css?v={BREVIARY_CSS_VERSION}-encrypted-learner-responsive"
+            if dated
+            else f"../../../breviary.css?v={BREVIARY_CSS_VERSION}-encrypted-learner-responsive"
+        )
+        unlock_href = "../index.html" if dated else "index.html"
+        if dated:
+            add_document(
+                f"learner-responsive-{date_name}-index",
+                target_dir / "index.html",
+                css_href,
+                learner_responsive_index_inner(site, available_dates, updated, date_name),
+                unlock_href=unlock_href,
+                index_page=True,
+            )
+
+        prayer_by_slug = {prayer.slug: prayer for prayer in site.prayers}
+        ordered = [prayer_by_slug[slug] for _, slug in ENGLISH_PRAYERS]
+        bodies = learner_bodies.get(date_name)
+        if bodies is None:
+            raise LearnerLanguageError(f"Responsive learner body is missing for {date_name}")
+        for prayer_index, prayer in enumerate(ordered):
+            previous_prayer = ordered[prayer_index - 1] if prayer_index > 0 else None
+            next_prayer = ordered[prayer_index + 1] if prayer_index + 1 < len(ordered) else None
+            body_html = bodies.get(prayer.slug)
+            if not body_html:
+                raise LearnerLanguageError(
+                    f"Responsive learner body is missing for {date_name}/{prayer.slug}"
+                )
+            nav = english_responsive_nav_html(previous_prayer, next_prayer)
+            add_document(
+                f"learner-responsive-{prefix}{prayer.slug}",
+                target_dir / f"{prayer.slug}.html",
+                css_href,
+                learner_responsive_prayer_inner(
+                    prayer,
+                    site.liturgical_day,
+                    body_html,
+                    nav,
+                    updated,
+                ),
+                unlock_href=unlock_href,
+            )
+
+    for site in day_sites:
+        add_site_documents(
+            site,
+            target_root / date_dir_name(site.date),
+            f"{date_dir_name(site.date)}-",
+            True,
+        )
+    add_site_documents(today, target_root, "root-", False)
+
+    ciphertexts = encrypt_english_pages(documents, passcode)
+    temporary = target_root.with_name(f"{target_root.name}.new")
+    if temporary.exists():
+        shutil.rmtree(temporary)
+    temporary.mkdir(parents=True)
+    for output in outputs:
+        relative = Path(output["path"]).relative_to(target_root)
+        destination = temporary / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shell_class = "learner-responsive-page responsive-index" if output["index_page"] else "learner-responsive-page responsive-prayer"
+        destination.write_text(
+            english_encrypted_shell(
+                ciphertexts[str(output["id"])],
+                str(output["css_href"]),
+                unlock_page=bool(output["unlock_page"]),
+                unlock_href=str(output["unlock_href"]),
+                session_key=ENGLISH_LEARNER_RESPONSIVE_SESSION_KEY,
+                body_class=(
+                    f"{LEARNER_PROFILE_CLASS} {LEARNER_RESPONSIVE_PROFILE_CLASS} "
+                    f"{ENGLISH_SOURCE_PROFILE_CLASS}"
+                ),
+                shell_class=shell_class,
+            ),
+            encoding="utf-8",
+        )
+    if target_root.exists():
+        shutil.rmtree(target_root)
+    temporary.rename(target_root)
+    logging.info("Generated %d encrypted responsive learner pages", len(outputs))
+
+
 def validate_encrypted_english_bundle(english_root: Path) -> None:
     """Reject incomplete or mixed eight/five-hour bundles before publication."""
     expected_slugs = {slug for _, slug in ENGLISH_PRAYERS}
@@ -4445,7 +5003,8 @@ def validate_encrypted_english_bundle(english_root: Path) -> None:
         "midday-prayer",
         "midafternoon-prayer",
     }
-    for root in (english_root, english_root / "learner"):
+    responsive_root = english_root / "learner-responsive"
+    for root in (english_root, english_root / "learner", responsive_root):
         if not (root / "index.html").is_file():
             raise ValueError(f"Encrypted English bundle index is missing in {root}")
         missing = sorted(slug for slug in expected_slugs if not (root / f"{slug}.html").is_file())
@@ -4454,6 +5013,25 @@ def validate_encrypted_english_bundle(english_root: Path) -> None:
         leaked = sorted(slug for slug in legacy_slugs if (root / f"{slug}.html").exists())
         if leaked:
             raise ValueError(f"Legacy eight-hour prayer files leaked into the new bundle: {leaked}")
+    responsive_shell = (responsive_root / "index.html").read_text(encoding="utf-8")
+    for marker in (
+        LEARNER_PROFILE_CLASS,
+        LEARNER_RESPONSIVE_PROFILE_CLASS,
+        ENGLISH_SOURCE_PROFILE_CLASS,
+        ENGLISH_LEARNER_RESPONSIVE_SESSION_KEY,
+    ):
+        if marker not in responsive_shell:
+            raise ValueError(f"Responsive learner shell is missing marker {marker}")
+    numbered_pattern = re.compile(
+        rf"^(?:{'|'.join(re.escape(slug) for slug in expected_slugs)})-\d+\.html$"
+    )
+    numbered = sorted(
+        path.relative_to(responsive_root).as_posix()
+        for path in responsive_root.rglob("*.html")
+        if numbered_pattern.fullmatch(path.name)
+    )
+    if numbered:
+        raise ValueError(f"Responsive learner must not contain numbered pages: {numbered}")
 
 
 def write_english_bundle_atomic(
@@ -4462,7 +5040,7 @@ def write_english_bundle_atomic(
     passcode: str,
     learner_bodies: dict[str, dict[str, str]],
 ) -> None:
-    """Build regular and learner editions together, then swap one complete tree."""
+    """Build Reading and both learner editions, then swap one complete tree."""
     live_root = SITE_DIR / "breviary" / "en"
     staging_root = live_root.with_name("en.bundle-new")
     BUILD_DIR.mkdir(parents=True, exist_ok=True)
@@ -4483,6 +5061,12 @@ def write_english_bundle_atomic(
             learner_bodies,
             target_root=staging_root / "learner",
         )
+        write_english_learner_responsive(
+            learner_sites,
+            passcode,
+            learner_bodies,
+            target_root=staging_root / "learner-responsive",
+        )
         validate_encrypted_english_bundle(staging_root)
         if live_root.exists():
             live_root.rename(previous_root)
@@ -4497,7 +5081,7 @@ def write_english_bundle_atomic(
             shutil.rmtree(staging_root)
     if previous_root.exists():
         shutil.rmtree(previous_root)
-    logging.info("Published one atomic five-hour English + learner bundle")
+    logging.info("Published one atomic five-hour Reading + Kindle learner + responsive learner bundle")
 
 
 def build_english_breviary(run_date: datetime, passcode: str) -> None:
@@ -5440,6 +6024,7 @@ def main() -> int:
             return 0
         if args.breviary_only:
             write_breviary_snapshot()
+            finalize_mode_navigation(datetime.now(VN_TZ))
             return 0
         if args.english_only:
             passcode = os.environ.get(ENGLISH_BREVIARY_PASSCODE_ENV, "")
@@ -5447,7 +6032,9 @@ def main() -> int:
                 raise ValueError(f"{ENGLISH_BREVIARY_PASSCODE_ENV} is required for --english-only")
             SITE_DIR.mkdir(parents=True, exist_ok=True)
             write_breviary_stylesheet()
-            build_english_breviary(datetime.now(VN_TZ), passcode)
+            run_date = datetime.now(VN_TZ)
+            build_english_breviary(run_date, passcode)
+            finalize_mode_navigation(run_date)
             return 0
         session = requests.Session()
         run_date = datetime.now(VN_TZ)
@@ -5490,6 +6077,7 @@ def main() -> int:
                 "%s is not configured; preserving the last successfully deployed English Breviary",
                 ENGLISH_BREVIARY_PASSCODE_ENV,
             )
+        finalize_mode_navigation(run_date)
         append_debug([line for site in day_sites for line in site.debug_lines])
         logging.info("Generated %d day(s) of prayer pages in %s", len(day_sites), SITE_DIR.relative_to(ROOT))
         return 0

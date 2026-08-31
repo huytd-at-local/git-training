@@ -14,8 +14,10 @@ grep -q 'build/previous-pages/breviary/en/index.html' .github/workflows/pages.ym
 grep -q 'cp -R build/previous-pages/breviary/en site/breviary/' .github/workflows/pages.yml
 grep -q 'BREVIARY_REFRESH_LEARNER' .github/workflows/pages.yml
 grep -q 'breviary-learner-language-v3.json' .github/workflows/pages.yml
+grep -q 'breviary-learner-edition-v3-' .github/workflows/pages.yml
 grep -q 'breviary-learner-edition-v2-' .github/workflows/pages.yml
 grep -q 'breviary-learner-edition-v1-' .github/workflows/pages.yml
+grep -q 'site/breviary/en/learner-responsive' .github/workflows/pages.yml
 grep -q "artifact.name === 'github-pages' && !artifact.expired" .github/workflows/pages.yml
 grep -q 'retention-days: 7' .github/workflows/pages.yml
 grep -q 'cron: "23 17 \* \* \*"' .github/workflows/pages.yml
@@ -911,20 +913,34 @@ with tempfile.TemporaryDirectory() as temporary_dir:
         ):
             raise SystemExit("Restored learner Office exceeds its Kindle page budget")
         write_english_learner([test_day], "123456", restored_bodies)
+        fetch_module.write_english_learner_responsive(
+            [test_day], "123456", restored_bodies
+        )
+        responsive_index = (
+            fetch_module.SITE_DIR
+            / "breviary"
+            / "en"
+            / "learner-responsive"
+            / "index.html"
+        )
         write_english_breviary([test_day], "123456", preserve_learner=True)
         if not learner_index.is_file():
             raise SystemExit("Normal English rebuild removed the learner edition without an API key")
+        if not responsive_index.is_file():
+            raise SystemExit("Normal English rebuild removed the responsive learner edition")
         fetch_module.write_english_bundle_atomic(
             [test_day], [test_day], "123456", restored_bodies
         )
         english_root = fetch_module.SITE_DIR / "breviary" / "en"
         fetch_module.validate_encrypted_english_bundle(english_root)
+        responsive_root = english_root / "learner-responsive"
         for legacy_slug in (
             "invitatory", "midmorning-prayer", "midday-prayer", "midafternoon-prayer"
         ):
-            if (english_root / f"{legacy_slug}.html").exists() or (
-                english_root / "learner" / f"{legacy_slug}.html"
-            ).exists():
+            if any(
+                (root / f"{legacy_slug}.html").exists()
+                for root in (english_root, english_root / "learner", responsive_root)
+            ):
                 raise SystemExit("Atomic five-hour bundle retained a legacy prayer entrypoint")
         if ENGLISH_SOURCE_PROFILE_CLASS not in (
             english_root / "index.html"
@@ -934,6 +950,7 @@ with tempfile.TemporaryDirectory() as temporary_dir:
         for page_id, index_path in (
             ("root-index", english_root / "index.html"),
             ("learner-root-index", english_root / "learner" / "index.html"),
+            ("learner-responsive-root-index", responsive_root / "index.html"),
         ):
             decrypted = fetch_module.decrypt_english_pages(
                 [{"id": page_id, "ciphertext": fetch_module.encrypted_shell_ciphertext(index_path)}],
@@ -946,6 +963,119 @@ with tempfile.TemporaryDirectory() as temporary_dir:
                 raise SystemExit(f"Encrypted English index is not exactly five hours: {titles}")
             if "Source: iBreviary" not in decrypted_index.get_text(" ", strip=True):
                 raise SystemExit("Encrypted English index retained the previous source attribution")
+
+        responsive_shell = responsive_index.read_text(encoding="utf-8")
+        if fetch_module.LEARNER_RESPONSIVE_PROFILE_CLASS not in responsive_shell:
+            raise SystemExit("Responsive learner shell omitted its presentation profile")
+        if fetch_module.ENGLISH_LEARNER_RESPONSIVE_SESSION_KEY not in responsive_shell:
+            raise SystemExit("Responsive learner shell omitted its independent session key")
+        if fetch_module.ENGLISH_LEARNER_SESSION_KEY in responsive_shell:
+            raise SystemExit("Responsive learner accidentally reused the Kindle learner session key")
+        responsive_prayer = responsive_root / "morning-prayer.html"
+        decrypted_responsive = fetch_module.decrypt_english_pages(
+            [
+                {
+                    "id": "unlock",
+                    "ciphertext": fetch_module.encrypted_shell_ciphertext(responsive_index),
+                },
+                {
+                    "id": "prayer",
+                    "ciphertext": fetch_module.encrypted_shell_ciphertext(responsive_prayer),
+                },
+            ],
+            "123456",
+        )["prayer"]
+        responsive_soup = BeautifulSoup(decrypted_responsive, "lxml")
+        if len(responsive_soup.select(".learner-row")) != learner_body.count("learner-row"):
+            raise SystemExit("Responsive learner lost rows from the complete prayer")
+        if responsive_soup.select_one(".paged-nav"):
+            raise SystemExit("Responsive learner retained Kindle pagination navigation")
+        if not responsive_soup.select_one(".responsive-nav"):
+            raise SystemExit("Responsive learner prayer is missing its bottom navigation")
+        numbered_responsive = [
+            path
+            for path in responsive_root.rglob("*.html")
+            if re.search(r"-\d+\.html$", path.name)
+        ]
+        if numbered_responsive:
+            raise SystemExit(f"Responsive learner was split into numbered pages: {numbered_responsive}")
+    finally:
+        fetch_module.SITE_DIR = original_site_dir
+
+# The final navigation pass must only advertise modes that exist for each date,
+# must not alter encrypted payloads, and must remain idempotent.
+with tempfile.TemporaryDirectory() as temporary_dir:
+    original_site_dir = fetch_module.SITE_DIR
+    fetch_module.SITE_DIR = Path(temporary_dir) / "site"
+    try:
+        dates = ["2026-08-22", "2026-08-23", "2026-08-24"]
+        modes = fetch_module.reader_modes()
+        for mode in modes:
+            root_index = mode.index_path()
+            root_index.parent.mkdir(parents=True, exist_ok=True)
+            root_index.write_text(
+                '<!doctype html><html><body><main><p>ROOT-CIPHERTEXT-SENTINEL</p></main></body></html>',
+                encoding="utf-8",
+            )
+            for date_name in dates:
+                if mode.key.startswith("en-learner") and date_name != "2026-08-23":
+                    continue
+                dated_index = mode.index_path(date_name)
+                dated_index.parent.mkdir(parents=True, exist_ok=True)
+                dated_index.write_text(
+                    '<!doctype html><html><body><main><p>DATED-CIPHERTEXT-SENTINEL</p></main></body></html>',
+                    encoding="utf-8",
+                )
+        fetch_module.finalize_mode_navigation(datetime(2026, 8, 23, tzinfo=fetch_module.VN_TZ))
+        first_snapshot = {
+            path.relative_to(fetch_module.SITE_DIR).as_posix(): path.read_text(encoding="utf-8")
+            for path in fetch_module.SITE_DIR.rglob("*.html")
+        }
+        fetch_module.finalize_mode_navigation(datetime(2026, 8, 23, tzinfo=fetch_module.VN_TZ))
+        second_snapshot = {
+            path.relative_to(fetch_module.SITE_DIR).as_posix(): path.read_text(encoding="utf-8")
+            for path in fetch_module.SITE_DIR.rglob("*.html")
+        }
+        if first_snapshot != second_snapshot:
+            raise SystemExit("Mode directory finalization is not idempotent")
+
+        for date_name, expected_count in (("2026-08-22", 4), ("2026-08-23", 6), ("2026-08-24", 4)):
+            hub_path = fetch_module.SITE_DIR / "modes" / date_name / "index.html"
+            hub_soup = BeautifulSoup(hub_path.read_text(encoding="utf-8"), "lxml")
+            mode_links = hub_soup.select(".mode-directory-group li a")
+            if len(mode_links) != expected_count:
+                raise SystemExit(
+                    f"Mode hub advertised unavailable modes for {date_name}: {len(mode_links)}"
+                )
+            for link in mode_links:
+                target = (hub_path.parent / link["href"]).resolve()
+                if not target.is_file():
+                    raise SystemExit(f"Mode hub contains a dead link: {link['href']}")
+
+        root_hub = fetch_module.SITE_DIR / "modes" / "index.html"
+        root_hub_soup = BeautifulSoup(root_hub.read_text(encoding="utf-8"), "lxml")
+        if len(root_hub_soup.select(".mode-directory-group li a")) != len(modes):
+            raise SystemExit("Root mode hub did not list every available current mode")
+        for mode in modes:
+            for index_path in [mode.index_path()] + [
+                mode.index_path(date_name)
+                for date_name in dates
+                if mode.index_path(date_name).is_file()
+            ]:
+                text = index_path.read_text(encoding="utf-8")
+                soup = BeautifulSoup(text, "lxml")
+                footers = soup.select("main > .mode-directory-link")
+                if len(footers) != 1 or footers[0] is not soup.main.find_all(recursive=False)[-1]:
+                    raise SystemExit(f"Mode index footer is missing or not last in {index_path}")
+                sentinel = "ROOT-CIPHERTEXT-SENTINEL" if index_path == mode.index_path() else "DATED-CIPHERTEXT-SENTINEL"
+                if sentinel not in text:
+                    raise SystemExit(f"Mode finalization altered the existing index payload in {index_path}")
+                expected_label = "Reading modes" if mode.section == "English" else "Chọn chế độ đọc"
+                if footers[0].get_text(" ", strip=True) != expected_label:
+                    raise SystemExit(f"Mode index footer used the wrong language in {index_path}")
+                target = (index_path.parent / footers[0].a["href"]).resolve()
+                if not target.is_file():
+                    raise SystemExit(f"Mode index footer contains a dead link in {index_path}")
     finally:
         fetch_module.SITE_DIR = original_site_dir
 
