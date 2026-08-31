@@ -358,8 +358,9 @@ BREVIARY_CSS = """
       display: table;
       width: 100%;
       table-layout: fixed;
+      border-collapse: collapse;
+      border-spacing: 0;
       margin: 0;
-      border-bottom: 1px solid #e1ddd5;
     }
 
     .learner-responsive-page .learner-english,
@@ -445,7 +446,7 @@ BREVIARY_CSS = """
       }
     }
 """
-BREVIARY_CSS_VERSION = "11"
+BREVIARY_CSS_VERSION = "12"
 
 PAGE_TARGET_UNITS = 17.4
 FIRST_PAGE_TARGET_UNITS = 14.4

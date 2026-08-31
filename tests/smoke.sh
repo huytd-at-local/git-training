@@ -251,8 +251,12 @@ responsive_pronunciation_rules = re.findall(
 if not responsive_row_rule or not {
     "display: table",
     "table-layout: fixed",
+    "border-collapse: collapse",
+    "border-spacing: 0",
 }.issubset(set(re.findall(r"[a-z-]+:\s*[^;]+", responsive_row_rule.group(1)))):
     raise SystemExit("Responsive learner lost its fixed two-column row contract")
+if "border-bottom" in responsive_row_rule.group(1):
+    raise SystemExit("Responsive learner restored horizontal row separators")
 if not responsive_cells_rule or "display: table-cell" not in responsive_cells_rule.group(1):
     raise SystemExit("Responsive learner cells no longer remain side by side")
 if not responsive_english_rule or "width: 56%" not in responsive_english_rule.group(1):
