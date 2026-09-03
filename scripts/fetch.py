@@ -32,7 +32,7 @@ ENGLISH_BREVIARY_PASSCODE_ENV = "BREVIARY_EN_PASSCODE"
 LEARNER_GEMINI_API_KEY_ENV = "BREVIARY_LEARNER_GEMINI_API_KEY"
 LEARNER_GEMINI_MODEL_ENV = "BREVIARY_LEARNER_GEMINI_MODEL"
 LEARNER_REFRESH_ENV = "BREVIARY_REFRESH_LEARNER"
-LEARNER_GEMINI_DEFAULT_MODEL = "gemini-3.6-flash"
+LEARNER_GEMINI_DEFAULT_MODEL = "gemini-3.7-flash"
 GEMINI_GENERATE_CONTENT_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 LEARNER_PRONUNCIATION_PROFILE = "casual-british-ipa-v1"
 LEARNER_PROFILE_CLASS = f"learner-profile-{LEARNER_PRONUNCIATION_PROFILE}"
@@ -1222,7 +1222,6 @@ class LearnerLanguage:
             "systemInstruction": {"parts": [{"text": instructions}]},
             "contents": [{"parts": [{"text": json.dumps(payload, ensure_ascii=False)}]}],
             "generationConfig": {
-                "temperature": 0.2,
                 "responseMimeType": "application/json",
                 "responseJsonSchema": schema,
             },

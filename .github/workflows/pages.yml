@@ -112,7 +112,7 @@ jobs:
         env:
           BREVIARY_EN_PASSCODE: ${{ secrets.BREVIARY_EN_PASSCODE }}
           BREVIARY_LEARNER_GEMINI_API_KEY: ${{ secrets.BREVIARY_LEARNER_GEMINI_API_KEY }}
-          BREVIARY_LEARNER_GEMINI_MODEL: gemini-3.6-flash
+          BREVIARY_LEARNER_GEMINI_MODEL: gemini-3.7-flash
           # A push and the bounded backup schedule reuse the encrypted learner
           # edition. The primary schedule/manual run refreshes today's guides.
           BREVIARY_REFRESH_LEARNER: ${{ (github.event_name == 'workflow_dispatch' || github.event.schedule == '23 17 * * *') && '1' || '0' }}

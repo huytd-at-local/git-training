@@ -13,6 +13,7 @@ grep -q 'Seed last-known-good English editions' .github/workflows/pages.yml
 grep -q 'build/previous-pages/breviary/en/index.html' .github/workflows/pages.yml
 grep -q 'cp -R build/previous-pages/breviary/en site/breviary/' .github/workflows/pages.yml
 grep -q 'BREVIARY_REFRESH_LEARNER' .github/workflows/pages.yml
+grep -q 'BREVIARY_LEARNER_GEMINI_MODEL: gemini-3.7-flash' .github/workflows/pages.yml
 grep -q 'breviary-learner-language-v3.json' .github/workflows/pages.yml
 grep -q 'breviary-learner-edition-v3-' .github/workflows/pages.yml
 grep -q 'breviary-learner-edition-v2-' .github/workflows/pages.yml
@@ -374,6 +375,19 @@ english_inner = english_prayer_inner(
 if english_inner.count('class="page-nav paged-nav breviary-nav"') != 1:
     raise SystemExit("English prayer page must have only the bottom Breviary navigation")
 
+original_model_env = os.environ.pop(fetch_module.LEARNER_GEMINI_MODEL_ENV, None)
+try:
+    if LearnerLanguage("test-key").model != "gemini-3.7-flash":
+        raise SystemExit("Learner default Gemini model is not gemini-3.7-flash")
+    os.environ[fetch_module.LEARNER_GEMINI_MODEL_ENV] = "gemini-env-override"
+    if LearnerLanguage("test-key").model != "gemini-env-override":
+        raise SystemExit("Learner Gemini model environment override was ignored")
+finally:
+    if original_model_env is None:
+        os.environ.pop(fetch_module.LEARNER_GEMINI_MODEL_ENV, None)
+    else:
+        os.environ[fetch_module.LEARNER_GEMINI_MODEL_ENV] = original_model_env
+
 class FakeGeminiResponse:
     def raise_for_status(self):
         return None
@@ -404,6 +418,8 @@ if gemini_call["headers"].get("x-goog-api-key") != "test-key":
 config = gemini_call["json"].get("generationConfig", {})
 if config.get("responseMimeType") != "application/json" or "responseJsonSchema" not in config:
     raise SystemExit("Learner request does not enforce Gemini structured JSON output")
+if "temperature" in config:
+    raise SystemExit("Learner request retained a deprecated Gemini sampling parameter")
 
 ipa_source = "The IPA is designed to represent those qualities of speech that are part of lexical"
 ipa_example = (

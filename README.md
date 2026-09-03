@@ -47,7 +47,7 @@ thêm `BREVIARY_LEARNER_GEMINI_API_KEY`; Gemini API chỉ chạy lúc build đ�
 IPA Anh-Anh tự nhiên và giải thích từ đơn giản. Kindle chỉ nhận HTML mã hóa đã tạo sẵn,
 không gọi API hay tải tài nguyên ngoài lúc đọc. GitHub Actions giữ cache ngắn
 hạn của kết quả ngôn ngữ để tránh tạo lại các câu lặp. Model mặc định là
-`gemini-3.6-flash`. Nếu Gemini trả thiếu một mục, build giữ ngay các mục hợp lệ
+`gemini-3.7-flash`. Nếu Gemini trả thiếu một mục, build giữ ngay các mục hợp lệ
 và retry riêng phần còn thiếu. Nếu learner hoặc nguồn iBreviary vẫn lỗi,
 workflow giữ bản English đã deploy thành công gần nhất và tiếp tục publish phần
 tiếng Việt; lỗi phụ vẫn xuất hiện dưới dạng warning trong GitHub Actions.
