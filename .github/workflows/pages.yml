@@ -8,7 +8,7 @@ on:
   schedule:
     # 00:23 Vietnam time, away from the top-of-hour scheduling surge.
     - cron: "23 17 * * *"
-    # A second source-only refresh provides bounded recovery if the first
+    # A second refresh recovers a missing learner date if the first
     # scheduled run is delayed or an upstream service is temporarily down.
     - cron: "17 18 * * *"
 
@@ -113,9 +113,8 @@ jobs:
           BREVIARY_EN_PASSCODE: ${{ secrets.BREVIARY_EN_PASSCODE }}
           BREVIARY_LEARNER_GEMINI_API_KEY: ${{ secrets.BREVIARY_LEARNER_GEMINI_API_KEY }}
           BREVIARY_LEARNER_GEMINI_MODEL: gemini-3.7-flash
-          # A push and the bounded backup schedule reuse the encrypted learner
-          # edition. The primary schedule/manual run refreshes today's guides.
-          BREVIARY_REFRESH_LEARNER: ${{ (github.event_name == 'workflow_dispatch' || github.event.schedule == '23 17 * * *') && '1' || '0' }}
+          # Backup recovers missing dates; an already-current learner uses no API.
+          BREVIARY_REFRESH_LEARNER: ${{ (github.event_name == 'workflow_dispatch' || github.event.schedule == '23 17 * * *') && '1' || (github.event_name == 'schedule' && 'missing' || '0') }}
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4

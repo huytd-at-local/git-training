@@ -51,6 +51,9 @@ hạn của kết quả ngôn ngữ để tránh tạo lại các câu lặp. Mo
 và retry riêng phần còn thiếu. Nếu learner hoặc nguồn iBreviary vẫn lỗi,
 workflow giữ bản English đã deploy thành công gần nhất và tiếp tục publish phần
 tiếng Việt; lỗi phụ vẫn xuất hiện dưới dạng warning trong GitHub Actions.
+Lượt dự phòng tự phục hồi learner nếu thiếu ngày hiện tại; nếu đã có thì tái sử dụng
+bản mã hóa, không gọi Gemini. Actions summary báo ngày yêu cầu, ngày có sẵn và
+trạng thái refresh/reuse/fallback riêng cho hai bản learner.
 
 ## Test
 

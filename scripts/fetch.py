@@ -5101,9 +5101,13 @@ def build_english_breviary(run_date: datetime, passcode: str) -> None:
     existing_learner = learner_root.is_dir()
     learner_profile_current = existing_learner and learner_edition_profile_matches(learner_root)
     profile_refresh_required = existing_learner and not learner_profile_current
+    refresh_mode = os.environ.get(LEARNER_REFRESH_ENV, "").strip()
     refresh_learner = (
-        os.environ.get(LEARNER_REFRESH_ENV, "").strip() == "1" or profile_refresh_required
+        refresh_mode == "1" or profile_refresh_required
+        or (refresh_mode == "missing" and not learner_edition_covers_date(learner_root, run_date))
     )
+    action = "fallback"
+    reason = "No current learner generated; refresh disabled or API key unavailable"
     learner_bodies: dict[str, dict[str, str]] | None = None
     learner_sites = [sites[1]]
     if profile_refresh_required:
@@ -5119,6 +5123,7 @@ def build_english_breviary(run_date: datetime, passcode: str) -> None:
             # Gemini free-tier request budget, avoids generating three complete
             # days of pronunciation and glossary material on every refresh.
             learner_bodies = prepare_english_learner_bodies(learner_sites, language)
+            action, reason = "refresh", "Generated today's learner using language cache and missing-item requests"
         elif (
             existing_learner
             and learner_profile_current
@@ -5129,6 +5134,7 @@ def build_english_breviary(run_date: datetime, passcode: str) -> None:
             learner_bodies = restore_english_learner_bodies(
                 learner_root, passcode, learner_sites[0].date
             )
+            action, reason = "reuse", "Restored current encrypted learner without Gemini"
         elif existing_learner and learner_profile_current:
             logging.warning(
                 "The cached English learner edition does not cover %s; preserving it until the scheduled refresh",
@@ -5137,6 +5143,7 @@ def build_english_breviary(run_date: datetime, passcode: str) -> None:
         elif learner_api_key:
             language = LearnerLanguage(learner_api_key)
             learner_bodies = prepare_english_learner_bodies(learner_sites, language)
+            action, reason = "refresh", "Generated missing learner edition"
         elif existing_learner:
             logging.warning(
                 "The encrypted learner edition uses an older pronunciation profile; preserving it "
@@ -5154,7 +5161,9 @@ def build_english_breviary(run_date: datetime, passcode: str) -> None:
         )
         github_actions_warning("English learner refresh degraded", str(error))
         learner_bodies = None
+        reason = "Learner generation or restoration failed; see the refresh warning above"
     if profile_refresh_required and learner_bodies is None:
+        report_learner_freshness(run_date, action, reason)
         raise LearnerLanguageError(
             "The cached learner edition uses the previous source/hour contract; "
             "the complete English bundle is being preserved until its five-hour replacement succeeds"
@@ -5168,6 +5177,26 @@ def build_english_breviary(run_date: datetime, passcode: str) -> None:
             preserve_learner=existing_learner,
             include_learner_link=existing_learner,
         )
+    report_learner_freshness(run_date, action, reason)
+
+
+def report_learner_freshness(run_date: datetime, action: str, reason: str) -> None:
+    target = date_dir_name(run_date)
+    lines = ["### English learner freshness", "", f"Requested date: {target}",
+             f"Action: {action}", f"Reason: {reason}"]
+    for name in ("learner", "learner-responsive"):
+        root = SITE_DIR / "breviary" / "en" / name
+        dates = sorted(p.name for p in root.glob("????-??-??") if (p / "index.html").is_file())
+        current = learner_edition_profile_matches(root) and learner_edition_covers_date(root, run_date)
+        line = f"{name}: {'current' if current else 'stale/missing'}; available dates: {', '.join(dates) or 'none'}"
+        lines.append(line)
+        logging.info("%s", line)
+        if not current:
+            github_actions_warning("English learner stale", f"Requested {target}; {line}")
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as output:
+            output.write("\n\n".join(lines) + "\n")
 
 
 def update_english_breviary_optional(run_date: datetime, passcode: str) -> bool:
@@ -5178,6 +5207,7 @@ def update_english_breviary_optional(run_date: datetime, passcode: str) -> bool:
         logging.exception(
             "English Breviary update failed; preserving the last successfully deployed English edition"
         )
+        report_learner_freshness(run_date, "fallback", "English update failed; see warning and build log")
         github_actions_warning("English Breviary refresh degraded", str(error))
         return False
     return True

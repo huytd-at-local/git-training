@@ -887,6 +887,41 @@ if degraded_english_writes != [{"preserve_learner": True, "include_learner_link"
 if unexpected_learner_writes:
     raise SystemExit("A failed learner refresh attempted to replace its last-known-good edition")
 
+# Primary outage -> backup outage -> backup recovery -> current-day reuse.
+from unittest.mock import patch
+with tempfile.TemporaryDirectory() as temporary_dir:
+    isolated_site = Path(temporary_dir) / "site"
+    summary = Path(temporary_dir) / "summary.md"
+    yesterday = learner_today - timedelta(days=1)
+    with patch.object(fetch_module, "SITE_DIR", isolated_site), patch.dict(os.environ, {
+        fetch_module.LEARNER_GEMINI_API_KEY_ENV: "test-key",
+        "GITHUB_STEP_SUMMARY": str(summary),
+    }), patch.object(fetch_module, "fetch_english_day", side_effect=lambda _session, date: learner_test_site(date)):
+        old_site = learner_test_site(yesterday)
+        old_bodies = {fetch_module.date_dir_name(yesterday): {slug: learner_body for _, slug in ENGLISH_PRAYERS}}
+        original_write_english_bundle_atomic([old_site], [old_site], "123456", old_bodies)
+        old_index = (isolated_site / "breviary/en/learner/index.html").read_bytes()
+        with patch.object(fetch_module, "LearnerLanguage", side_effect=LearnerLanguageError("synthetic 503")) as calls:
+            for mode in ("1", "missing"):
+                os.environ[fetch_module.LEARNER_REFRESH_ENV] = mode
+                build_english_breviary(learner_today, "123456")
+                if (isolated_site / "breviary/en/learner/index.html").read_bytes() != old_index:
+                    raise SystemExit("Outage replaced the preserved learner")
+            if calls.call_count != 2:
+                raise SystemExit("Backup did not attempt recovery after primary outage")
+        recovery_language = BatchLearnerLanguage()
+        with patch.object(fetch_module, "LearnerLanguage", return_value=recovery_language) as calls:
+            build_english_breviary(learner_today, "123456")
+            build_english_breviary(learner_today, "123456")
+            if calls.call_count != 1:
+                raise SystemExit("Current backup regenerated learner unnecessarily")
+        for name in ("learner", "learner-responsive"):
+            if not learner_edition_covers_date(isolated_site / "breviary/en" / name, learner_today):
+                raise SystemExit("Recovery failed to publish both learner editions")
+        report = summary.read_text()
+        if not all(value in report for value in ("stale/missing", "Action: refresh", "Action: reuse", "learner-responsive: current")):
+            raise SystemExit("Freshness summary omitted fallback, recovery or reuse")
+
 # During the source/hour migration, a learner failure must preserve the whole
 # previous English tree rather than publish five regular hours beside eight old
 # learner hours.
