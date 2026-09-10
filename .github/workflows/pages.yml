@@ -113,6 +113,7 @@ jobs:
           BREVIARY_EN_PASSCODE: ${{ secrets.BREVIARY_EN_PASSCODE }}
           BREVIARY_LEARNER_GEMINI_API_KEY: ${{ secrets.BREVIARY_LEARNER_GEMINI_API_KEY }}
           BREVIARY_LEARNER_GEMINI_MODEL: gemini-3.7-flash
+          BREVIARY_LEARNER_FALLBACK_MODEL: gemini-3.6-flash
           # Backup recovers missing dates; an already-current learner uses no API.
           BREVIARY_REFRESH_LEARNER: ${{ (github.event_name == 'workflow_dispatch' || github.event.schedule == '23 17 * * *') && '1' || (github.event_name == 'schedule' && 'missing' || '0') }}
 
@@ -135,3 +136,18 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  learner-freshness:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: github-pages
+          path: freshness-artifact
+      - name: Check published artifact learner date
+        run: |
+          mkdir -p freshness-site
+          tar -xf freshness-artifact/artifact.tar -C freshness-site
+          python3 scripts/check_learner_freshness.py freshness-site

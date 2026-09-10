@@ -54,6 +54,13 @@ tiếng Việt; lỗi phụ vẫn xuất hiện dưới dạng warning trong Git
 Lượt dự phòng tự phục hồi learner nếu thiếu ngày hiện tại; nếu đã có thì tái sử dụng
 bản mã hóa, không gọi Gemini. Actions summary báo ngày yêu cầu, ngày có sẵn và
 trạng thái refresh/reuse/fallback riêng cho hai bản learner.
+Nếu model chính hết retry do lỗi server/kết nối tạm thời, biến
+`BREVIARY_LEARNER_FALLBACK_MODEL` cho phép chuyển sang model dự phòng cho phần
+còn lại của lượt. Actions dùng `gemini-3.6-flash` sau khi kiểm chứng mẫu IPA/glossary;
+không chuyển model khi lỗi xác thực, request sai hoặc quota 429. Ngân sách mỗi
+lượt sinh ngôn ngữ là 15 phút / 120 request, dùng chung cho cả hai model.
+Job `learner-freshness` kiểm tra artifact độc lập; có thể báo đỏ vì learner cũ
+trong khi job deploy Reading vẫn thành công.
 
 ## Test
 

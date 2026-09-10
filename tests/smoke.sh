@@ -4,6 +4,7 @@ set -eu
 PYTHON_BIN="${PYTHON:-python3}"
 
 "$PYTHON_BIN" -m compileall scripts
+"$PYTHON_BIN" -m unittest discover -s tests -p 'test_learner_failover.py'
 test -f .github/workflows/pages.yml
 test -f .github/workflows/retry-pages-deployment.yml
 grep -q '^  build:$' .github/workflows/pages.yml

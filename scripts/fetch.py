@@ -1081,6 +1081,10 @@ class LearnerLanguageError(RuntimeError):
     """Raised when the build-time language enrichment is unavailable or invalid."""
 
 
+class LearnerTransientError(LearnerLanguageError):
+    """Transport/server outage eligible for the configured alternate model."""
+
+
 def github_actions_warning(title: str, message: str) -> None:
     """Expose an optional-stage failure without failing the publishable core."""
     if os.environ.get("GITHUB_ACTIONS", "").casefold() != "true":
@@ -1180,6 +1184,10 @@ class LearnerLanguage:
             raise LearnerLanguageError(f"{LEARNER_GEMINI_API_KEY_ENV} is required")
         self.api_key = api_key
         self.model = model or os.environ.get(LEARNER_GEMINI_MODEL_ENV, LEARNER_GEMINI_DEFAULT_MODEL)
+        self.fallback_model = os.environ.get("BREVIARY_LEARNER_FALLBACK_MODEL", "").strip()
+        self.fallback_used = False
+        self.deadline = time.monotonic() + 15 * 60
+        self.total_requests = 0
         self.cache = load_learner_language_cache()
         self.changed = False
         self.request_timestamps: list[float] = []
@@ -1198,12 +1206,15 @@ class LearnerLanguage:
         """Keep model calls safely below the upstream rolling request limit."""
         while True:
             now = time.monotonic()
+            if now >= self.deadline or self.total_requests >= 120:
+                raise LearnerLanguageError("Learner generation budget exhausted (15 minutes / 120 requests)")
             cutoff = now - LEARNER_REQUEST_WINDOW_SECONDS
             self.request_timestamps = [
                 timestamp for timestamp in self.request_timestamps if timestamp > cutoff
             ]
             if len(self.request_timestamps) < LEARNER_REQUESTS_PER_WINDOW:
                 self.request_timestamps.append(now)
+                self.total_requests += 1
                 return
             delay = (
                 self.request_timestamps[0]
@@ -1218,6 +1229,25 @@ class LearnerLanguage:
             time.sleep(max(1.0, delay))
 
     def request_json(self, name: str, schema: dict, instructions: str, payload: dict) -> dict:
+        try:
+            return self._request_json(name, schema, instructions, payload)
+        except LearnerTransientError:
+            if self.fallback_used or not self.fallback_model or self.fallback_model == self.model:
+                raise
+            previous_model = self.model
+            self.model = self.fallback_model
+            self.fallback_used = True
+            logging.warning("Gemini fallback: %s -> %s for %s", previous_model, self.model, name)
+            return self._request_json(name, schema, instructions, payload)
+        finally:
+            logging.info("Learner model: %s; fallback used: %s; requests: %d",
+                         self.model, self.fallback_used, self.total_requests)
+            summary = os.environ.get("GITHUB_STEP_SUMMARY")
+            if summary:
+                with open(summary, "a", encoding="utf-8") as output:
+                    output.write(f"\nLearner request {name}: model `{self.model}`, fallback={self.fallback_used}, requests={self.total_requests}\n")
+
+    def _request_json(self, name: str, schema: dict, instructions: str, payload: dict) -> dict:
         request_body = {
             "systemInstruction": {"parts": [{"text": instructions}]},
             "contents": [{"parts": [{"text": json.dumps(payload, ensure_ascii=False)}]}],
@@ -1236,11 +1266,11 @@ class LearnerLanguage:
                         "x-goog-api-key": self.api_key,
                     },
                     json=request_body,
-                    timeout=TIMEOUT_SECONDS * 3,
+                    timeout=max(1, min(TIMEOUT_SECONDS * 3, self.deadline - time.monotonic())),
                 )
             except requests.RequestException as error:
                 if attempt + 1 == LEARNER_MAX_RETRIES:
-                    raise LearnerLanguageError(f"Gemini {name} request failed: {error}") from error
+                    raise LearnerTransientError(f"Gemini {name} request failed: {error}") from error
                 delay = min(2**attempt, LEARNER_MAX_RETRY_SECONDS)
                 logging.warning("Gemini %s request failed; retrying in %ss", name, delay)
                 time.sleep(delay)
@@ -1265,7 +1295,8 @@ class LearnerLanguage:
                 response.raise_for_status()
             except requests.HTTPError as error:
                 detail = re.sub(r"\s+", " ", response.text).strip()[:600]
-                raise LearnerLanguageError(
+                error_type = LearnerTransientError if status_code in {500, 502, 503, 504} else LearnerLanguageError
+                raise error_type(
                     f"Gemini {name} request failed ({response.status_code}): {detail or error}"
                 ) from error
             try:
