@@ -520,6 +520,8 @@ LEARNER_IPA_INSTRUCTIONS = (
     "ˌreprɪˈzent ðəʊz ˈkwɒlətiz əv spiːtʃ ðətə ˈpɑːtəv ˈleksɪkəl'."
 )
 LEARNER_IPA_EVIDENCE = frozenset("ɑɒæʌəɜɛɪʊɔŋθðʃʒɡɹɾʔˈˌː")
+LEARNER_IPA_SYMBOLS = frozenset("abdefghijklmnoprstuvwzɑɒæʌəɜɛɪʊɔŋθðʃʒɡɹɾʔɐɫɚɝɨʉʍɱɳʰʲˈˌːˑ‿\u0329\u032f .,!;?—-")
+LEARNER_IPA_VOWELS = frozenset("aeiouɑɒæʌəɜɛɪʊɔɐɚɝɨʉ\u0329")
 VIETNAMESE_PRONUNCIATION_MARKS = frozenset("\u0300\u0301\u0302\u0303\u0306\u0309\u031b\u0323")
 
 LABEL_PATTERNS = [
@@ -1106,15 +1108,28 @@ def validate_casual_british_ipa(source_text: str, guide: str) -> str:
     has_vietnamese_spelling = "đ" in value.casefold() or any(
         mark in VIETNAMESE_PRONUNCIATION_MARKS for mark in decomposed
     )
-    if (
-        not value
-        or len(value) > 500
-        or any("A" <= character <= "Z" for character in value)
-        or any(character in value for character in "/[]")
-        or has_vietnamese_spelling
-        or not any(character in LEARNER_IPA_EVIDENCE for character in value)
-    ):
-        raise LearnerLanguageError(f"Casual British IPA response is invalid for {source_text!r}")
+    reason = None
+    if not value:
+        reason = "empty guide"
+    elif len(value) > 500:
+        reason = "guide exceeds 500 characters"
+    elif has_vietnamese_spelling:
+        reason = "Vietnamese respelling or tone marks"
+    elif any(character not in LEARNER_IPA_SYMBOLS for character in value):
+        reason = "unsupported IPA characters, decoration or prose"
+    elif not any(character in LEARNER_IPA_VOWELS for character in value):
+        reason = "no vowel or syllabic nucleus"
+    elif value.isascii() and re.search(r"ai|ei|oi|ou|th|sh|ch", value):
+        reason = "ASCII respelling digraphs instead of IPA symbols"
+    else:
+        source_words = re.findall(r"[a-z]+", source_text.casefold())
+        # Short forms can legitimately equal English spelling (men, help, let us).
+        # A long verbatim ASCII sentence is instead suspicious copied prose.
+        if (len(source_words) >= 4 and value.isascii()
+                and re.findall(r"[a-z]+", value) == source_words):
+            reason = "long verbatim source instead of transcription"
+    if reason:
+        raise LearnerLanguageError(f"Casual British IPA response is invalid: {reason}")
     return value
 
 
@@ -1357,12 +1372,16 @@ class LearnerLanguage:
                 for item in pending:
                     guide = by_id.get(item["id"])
                     if not isinstance(guide, str):
-                        unresolved.append(item)
+                        reason = "missing ID" if item["id"] not in by_id else "guide must be a string"
+                        logging.warning("IPA item rejected: id=%s source=%r reason=%s", item["id"], item["text"][:120], reason)
+                        unresolved.append({**item, "repair_reason": reason})
                         continue
                     try:
                         validated = validate_casual_british_ipa(item["text"], guide)
-                    except LearnerLanguageError:
-                        unresolved.append(item)
+                    except LearnerLanguageError as error:
+                        logging.warning("IPA item rejected: id=%s source=%r guide=%r reason=%s",
+                                        item["id"], item["text"][:120], guide[:120], error)
+                        unresolved.append({**item, "repair_reason": str(error)})
                         continue
                     result[item["text"]] = validated
                     self.cache["pronunciations"][learner_cache_key(item["text"])] = validated
