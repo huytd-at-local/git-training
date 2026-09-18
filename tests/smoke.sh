@@ -16,6 +16,8 @@ grep -q 'build/previous-pages/breviary/en/index.html' .github/workflows/pages.ym
 grep -q 'cp -R build/previous-pages/breviary/en site/breviary/' .github/workflows/pages.yml
 grep -q 'BREVIARY_REFRESH_LEARNER' .github/workflows/pages.yml
 grep -q 'BREVIARY_LEARNER_GEMINI_MODEL: gemini-3.7-flash' .github/workflows/pages.yml
+grep -q 'BREVIARY_LEARNER_FALLBACK_MODELS: gemini-3.6-flash,gemini-3.5-flash' .github/workflows/pages.yml
+! grep -q 'BREVIARY_LEARNER_FALLBACK_MODEL:' .github/workflows/pages.yml
 grep -q 'breviary-learner-language-v3.json' .github/workflows/pages.yml
 grep -q 'breviary-learner-edition-v3-' .github/workflows/pages.yml
 grep -q 'breviary-learner-edition-v2-' .github/workflows/pages.yml

@@ -31,6 +31,7 @@ IBREVIARY_OPTIONS_URL = urljoin(IBREVIARY_URL, "opzioni.php")
 ENGLISH_BREVIARY_PASSCODE_ENV = "BREVIARY_EN_PASSCODE"
 LEARNER_GEMINI_API_KEY_ENV = "BREVIARY_LEARNER_GEMINI_API_KEY"
 LEARNER_GEMINI_MODEL_ENV = "BREVIARY_LEARNER_GEMINI_MODEL"
+LEARNER_GEMINI_FALLBACK_MODELS_ENV = "BREVIARY_LEARNER_FALLBACK_MODELS"
 LEARNER_REFRESH_ENV = "BREVIARY_REFRESH_LEARNER"
 LEARNER_GEMINI_DEFAULT_MODEL = "gemini-3.7-flash"
 GEMINI_GENERATE_CONTENT_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -1198,9 +1199,15 @@ class LearnerLanguage:
         if not api_key:
             raise LearnerLanguageError(f"{LEARNER_GEMINI_API_KEY_ENV} is required")
         self.api_key = api_key
-        self.model = model or os.environ.get(LEARNER_GEMINI_MODEL_ENV, LEARNER_GEMINI_DEFAULT_MODEL)
-        self.fallback_model = os.environ.get("BREVIARY_LEARNER_FALLBACK_MODEL", "").strip()
-        self.fallback_used = False
+        primary_model = model or os.environ.get(LEARNER_GEMINI_MODEL_ENV, LEARNER_GEMINI_DEFAULT_MODEL)
+        configured_fallbacks = os.environ.get(LEARNER_GEMINI_FALLBACK_MODELS_ENV, "")
+        self.models = [primary_model]
+        for fallback_model in configured_fallbacks.split(","):
+            fallback_model = fallback_model.strip()
+            if fallback_model and fallback_model not in self.models:
+                self.models.append(fallback_model)
+        self.model_index = 0
+        self.model = self.models[self.model_index]
         self.deadline = time.monotonic() + 15 * 60
         self.total_requests = 0
         self.cache = load_learner_language_cache()
@@ -1245,22 +1252,27 @@ class LearnerLanguage:
 
     def request_json(self, name: str, schema: dict, instructions: str, payload: dict) -> dict:
         try:
-            return self._request_json(name, schema, instructions, payload)
-        except LearnerTransientError:
-            if self.fallback_used or not self.fallback_model or self.fallback_model == self.model:
-                raise
-            previous_model = self.model
-            self.model = self.fallback_model
-            self.fallback_used = True
-            logging.warning("Gemini fallback: %s -> %s for %s", previous_model, self.model, name)
-            return self._request_json(name, schema, instructions, payload)
+            while True:
+                try:
+                    return self._request_json(name, schema, instructions, payload)
+                except LearnerTransientError:
+                    if self.model_index + 1 >= len(self.models):
+                        raise
+                    previous_model = self.model
+                    self.model_index += 1
+                    self.model = self.models[self.model_index]
+                    logging.warning("Gemini fallback: %s -> %s for %s", previous_model, self.model, name)
         finally:
-            logging.info("Learner model: %s; fallback used: %s; requests: %d",
-                         self.model, self.fallback_used, self.total_requests)
+            chain = " -> ".join(self.models)
+            logging.info("Learner model: %s; model chain: %s; requests: %d",
+                         self.model, chain, self.total_requests)
             summary = os.environ.get("GITHUB_STEP_SUMMARY")
             if summary:
                 with open(summary, "a", encoding="utf-8") as output:
-                    output.write(f"\nLearner request {name}: model `{self.model}`, fallback={self.fallback_used}, requests={self.total_requests}\n")
+                    output.write(
+                        f"\nLearner request {name}: final_model `{self.model}`, "
+                        f"model_chain `{chain}`, requests={self.total_requests}\n"
+                    )
 
     def _request_json(self, name: str, schema: dict, instructions: str, payload: dict) -> dict:
         request_body = {
@@ -1283,13 +1295,15 @@ class LearnerLanguage:
                     json=request_body,
                     timeout=max(1, min(TIMEOUT_SECONDS * 3, self.deadline - time.monotonic())),
                 )
-            except requests.RequestException as error:
+            except (requests.ConnectionError, requests.Timeout) as error:
                 if attempt + 1 == LEARNER_MAX_RETRIES:
                     raise LearnerTransientError(f"Gemini {name} request failed: {error}") from error
                 delay = min(2**attempt, LEARNER_MAX_RETRY_SECONDS)
                 logging.warning("Gemini %s request failed; retrying in %ss", name, delay)
                 time.sleep(delay)
                 continue
+            except requests.RequestException as error:
+                raise LearnerLanguageError(f"Gemini {name} request failed: {error}") from error
             status_code = getattr(response, "status_code", None)
             if status_code in {429, 500, 502, 503, 504} and attempt + 1 < LEARNER_MAX_RETRIES:
                 delay = gemini_retry_seconds(response)
