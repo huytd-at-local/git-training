@@ -15,6 +15,8 @@ grep -q 'Seed last-known-good English editions' .github/workflows/pages.yml
 grep -q 'build/previous-pages/breviary/en/index.html' .github/workflows/pages.yml
 grep -q 'cp -R build/previous-pages/breviary/en site/breviary/' .github/workflows/pages.yml
 grep -q 'BREVIARY_REFRESH_LEARNER' .github/workflows/pages.yml
+grep -Fq "github.event.schedule == '23 17 * * *' && '1'" .github/workflows/pages.yml
+grep -Fq "github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'" .github/workflows/pages.yml
 grep -q 'BREVIARY_LEARNER_GEMINI_MODEL: gemini-3.7-flash' .github/workflows/pages.yml
 grep -q 'BREVIARY_LEARNER_FALLBACK_MODELS: gemini-3.6-flash,gemini-3.5-flash' .github/workflows/pages.yml
 ! grep -q 'BREVIARY_LEARNER_FALLBACK_MODEL:' .github/workflows/pages.yml
@@ -163,6 +165,8 @@ if test -f .cache/source.html && grep -Eq '<(em|i)([ >])' .cache/source.html; th
 fi
 
 "$PYTHON_BIN" - <<'PY'
+import io
+import logging
 import os
 import re
 import tempfile
@@ -214,6 +218,35 @@ from scripts.fetch import (
     write_english_breviary,
     write_english_learner,
 )
+
+refresh_env_lines = [
+    line.strip()
+    for line in Path(".github/workflows/pages.yml").read_text(encoding="utf-8").splitlines()
+    if line.strip().startswith("BREVIARY_REFRESH_LEARNER:")
+]
+expected_refresh_env = (
+    "BREVIARY_REFRESH_LEARNER: ${{ (github.event.schedule == '23 17 * * *' && '1') || "
+    "((github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && 'missing') || '0' }}"
+)
+if refresh_env_lines != [expected_refresh_env]:
+    raise SystemExit("Pages learner refresh expression changed; review event behavior explicitly")
+
+def learner_refresh_result(event_name, schedule):
+    # Python and/or return operands like GitHub Actions &&/|| for these nonempty strings.
+    return (
+        (schedule == "23 17 * * *" and "1")
+        or ((event_name == "workflow_dispatch" or event_name == "schedule") and "missing")
+        or "0"
+    )
+
+for event_name, schedule, expected in (
+    ("workflow_dispatch", None, "missing"),
+    ("schedule", "23 17 * * *", "1"),
+    ("schedule", "17 18 * * *", "missing"),
+    ("push", None, "0"),
+):
+    if learner_refresh_result(event_name, schedule) != expected:
+        raise SystemExit(f"Unexpected learner refresh policy for {event_name}/{schedule}: expected {expected}")
 
 expected_breviary_css = (
     Path("site/style.css").read_text(encoding="utf-8").rstrip()
@@ -466,6 +499,121 @@ class FakeRateLimitedGeminiResponse:
 
 if gemini_retry_seconds(FakeRateLimitedGeminiResponse()) != 53.5:
     raise SystemExit("Learner retry must respect the Gemini quota delay plus a safety margin")
+
+class FakeQuotaLimitedGeminiResponse:
+    status_code = 429
+    headers = {}
+    text = "RESPONSE_BODY_SENTINEL"
+
+    def json(self):
+        return {
+            "error": {
+                "details": [
+                    {
+                        "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                        "violations": [
+                            {
+                                "quotaMetric": "generativelanguage.googleapis.com/generate_content_free_tier_requests",
+                                "quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier",
+                                "quotaDimensions": {"model": "gemini-3.5-flash", "location": "global"},
+                                "quotaValue": "20",
+                                "unapprovedField": "MUST_NOT_BE_LOGGED",
+                            }
+                        ],
+                    },
+                    {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "22.821315385s"},
+                ]
+            }
+        }
+
+    def raise_for_status(self):
+        raise fetch_module.requests.HTTPError("429")
+
+if gemini_retry_seconds(FakeQuotaLimitedGeminiResponse()) != 24.821315385:
+    raise SystemExit("Learner retry must parse Google's structured RetryInfo delay")
+
+quota_log_stream = io.StringIO()
+quota_log_handler = logging.StreamHandler(quota_log_stream)
+quota_root_logger = logging.getLogger()
+quota_original_level = quota_root_logger.level
+quota_original_sleep = fetch_module.time.sleep
+quota_root_logger.setLevel(logging.WARNING)
+quota_root_logger.addHandler(quota_log_handler)
+quota_responses = [FakeQuotaLimitedGeminiResponse(), FakeGeminiResponse()]
+quota_delays = []
+try:
+    fetch_module.requests.post = lambda *_args, **_kwargs: quota_responses.pop(0)
+    fetch_module.time.sleep = quota_delays.append
+    quota_response = LearnerLanguage("test-key", "gemini-test").request_json(
+        "quota_smoke", {"type": "object"}, "Use JSON.", {"items": []}
+    )
+finally:
+    fetch_module.requests.post = original_post
+    fetch_module.time.sleep = quota_original_sleep
+    quota_root_logger.removeHandler(quota_log_handler)
+    quota_root_logger.setLevel(quota_original_level)
+quota_log = quota_log_stream.getvalue()
+if quota_response != {"items": []} or quota_delays != [24.821315385]:
+    raise SystemExit("Learner 429 handling did not honor structured quota retry guidance")
+for required_quota_field in (
+    "model=gemini-test", "attempt=1/3", "quotaMetric", "quotaId",
+    "quotaDimensions", "quotaValue", "server_retry_after=22.8s", "wait=24.8s",
+):
+    if required_quota_field not in quota_log:
+        raise SystemExit(f"Learner 429 diagnostic omitted {required_quota_field}")
+if "RESPONSE_BODY_SENTINEL" in quota_log or "MUST_NOT_BE_LOGGED" in quota_log:
+    raise SystemExit("Learner 429 diagnostic logged raw or unapproved response fields")
+
+class FakeMalformedQuotaGeminiResponse:
+    status_code = 429
+    headers = {}
+    text = "MALFORMED_BODY_SENTINEL"
+
+    def json(self):
+        raise ValueError("invalid JSON")
+
+    def raise_for_status(self):
+        raise fetch_module.requests.HTTPError("429")
+
+malformed_quota_language = LearnerLanguage("test-key", "gemini-test")
+malformed_quota_language.models.append("gemini-fallback")
+quota_responses = [FakeMalformedQuotaGeminiResponse() for _ in range(fetch_module.LEARNER_MAX_RETRIES)]
+quota_delays = []
+quota_log_stream = io.StringIO()
+quota_log_handler = logging.StreamHandler(quota_log_stream)
+quota_root_logger.setLevel(logging.WARNING)
+quota_root_logger.addHandler(quota_log_handler)
+quota_original_sleep = fetch_module.time.sleep
+try:
+    fetch_module.requests.post = lambda *_args, **_kwargs: quota_responses.pop(0)
+    fetch_module.time.sleep = quota_delays.append
+    try:
+        malformed_quota_language.request_json(
+            "malformed_quota_smoke", {"type": "object"}, "Use JSON.", {"items": []}
+        )
+    except LearnerLanguageError as error:
+        if "MALFORMED_BODY_SENTINEL" in str(error):
+            raise SystemExit("Learner 429 error exposed the raw response body")
+    else:
+        raise SystemExit("Learner 429 failure unexpectedly succeeded")
+finally:
+    fetch_module.requests.post = original_post
+    fetch_module.time.sleep = quota_original_sleep
+    quota_root_logger.removeHandler(quota_log_handler)
+    quota_root_logger.setLevel(quota_original_level)
+malformed_quota_log = quota_log_stream.getvalue()
+if quota_delays != [10.0, 10.0] or "retry budget exhausted" not in malformed_quota_log:
+    raise SystemExit("Malformed Gemini quota diagnostics must fail safely after bounded retries")
+last_attempt_log = (
+    "attempt=3/3 action=retry budget exhausted quota=unavailable "
+    "server_retry_after=unavailable wait=0.0s"
+)
+if last_attempt_log not in malformed_quota_log:
+    raise SystemExit("Final Gemini 429 attempt did not log exhaustion with zero additional wait")
+if malformed_quota_language.model != "gemini-test":
+    raise SystemExit("Gemini 429 unexpectedly switched to a fallback model")
+if "MALFORMED_BODY_SENTINEL" in malformed_quota_log or "quota=unavailable" not in malformed_quota_log:
+    raise SystemExit("Malformed Gemini quota diagnostics exposed raw response content")
 
 # Semantic repairs can push a nominal build above the upstream 20 RPM quota.
 # The client must throttle proactively, not wait for a 429 to discover it.

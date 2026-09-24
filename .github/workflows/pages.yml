@@ -114,8 +114,8 @@ jobs:
           BREVIARY_LEARNER_GEMINI_API_KEY: ${{ secrets.BREVIARY_LEARNER_GEMINI_API_KEY }}
           BREVIARY_LEARNER_GEMINI_MODEL: gemini-3.7-flash
           BREVIARY_LEARNER_FALLBACK_MODELS: gemini-3.6-flash,gemini-3.5-flash
-          # Backup recovers missing dates; an already-current learner uses no API.
-          BREVIARY_REFRESH_LEARNER: ${{ (github.event_name == 'workflow_dispatch' || github.event.schedule == '23 17 * * *') && '1' || (github.event_name == 'schedule' && 'missing' || '0') }}
+          # Manual/backup runs fill missing or stale-profile editions; the primary schedule forces refresh.
+          BREVIARY_REFRESH_LEARNER: ${{ (github.event.schedule == '23 17 * * *' && '1') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && 'missing') || '0' }}
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4

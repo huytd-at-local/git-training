@@ -1167,21 +1167,92 @@ def gemini_response_text(response: dict) -> str:
     return value
 
 
-def gemini_retry_seconds(response: requests.Response) -> float:
-    retry_after = response.headers.get("retry-after", "").strip()
+def _gemini_error_details(response: requests.Response) -> list[dict]:
+    response_json = getattr(response, "json", None)
+    if not callable(response_json):
+        return []
+    try:
+        body = response_json()
+    except (ValueError, requests.RequestException):
+        return []
+    error = body.get("error") if isinstance(body, dict) else None
+    details = error.get("details") if isinstance(error, dict) else None
+    return [detail for detail in details if isinstance(detail, dict)] if isinstance(details, list) else []
+
+
+def _safe_gemini_diagnostic_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    cleaned = re.sub(r"\s+", " ", value).strip()
+    return cleaned[:160] or None
+
+
+def gemini_quota_diagnostics(response: requests.Response) -> list[dict[str, object]]:
+    """Return a small allow-list of structured quota fields, never raw error text."""
+    quota_details: list[dict[str, object]] = []
+    for detail in _gemini_error_details(response):
+        detail_type = detail.get("@type")
+        if not isinstance(detail_type, str) or not detail_type.endswith("google.rpc.QuotaFailure"):
+            continue
+        violations = detail.get("violations")
+        if not isinstance(violations, list):
+            continue
+        for violation in violations:
+            if not isinstance(violation, dict):
+                continue
+            diagnostic: dict[str, object] = {}
+            for key in ("quotaMetric", "quotaId", "quotaValue"):
+                safe_value = _safe_gemini_diagnostic_text(violation.get(key))
+                if safe_value is not None:
+                    diagnostic[key] = safe_value
+            dimensions = violation.get("quotaDimensions")
+            if isinstance(dimensions, dict):
+                safe_dimensions = {
+                    key: safe_value
+                    for key in ("model", "location")
+                    if (safe_value := _safe_gemini_diagnostic_text(dimensions.get(key))) is not None
+                }
+                if safe_dimensions:
+                    diagnostic["quotaDimensions"] = safe_dimensions
+            if diagnostic:
+                quota_details.append(diagnostic)
+            if len(quota_details) == 5:
+                return quota_details
+    return quota_details
+
+
+def gemini_server_retry_seconds(response: requests.Response) -> float | None:
+    retry_after = getattr(response, "headers", {}).get("retry-after", "").strip()
     candidates: list[float] = []
     try:
         candidates.append(float(retry_after))
     except ValueError:
         pass
-    match = re.search(r"retry in\s+(\d+(?:\.\d+)?)s", response.text, flags=re.IGNORECASE)
+    match = re.search(
+        r"retry in\s+(\d+(?:\.\d+)?)s",
+        getattr(response, "text", ""),
+        flags=re.IGNORECASE,
+    )
     if match:
         candidates.append(float(match.group(1)))
-    if candidates:
+    for detail in _gemini_error_details(response):
+        detail_type = detail.get("@type")
+        retry_delay = detail.get("retryDelay")
+        if isinstance(detail_type, str) and detail_type.endswith("google.rpc.RetryInfo"):
+            if isinstance(retry_delay, str):
+                match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)s\s*", retry_delay)
+                if match:
+                    candidates.append(float(match.group(1)))
+    return max(candidates) if candidates else None
+
+
+def gemini_retry_seconds(response: requests.Response) -> float:
+    server_delay = gemini_server_retry_seconds(response)
+    if server_delay is not None:
         return max(
             1.0,
             min(
-                max(candidates) + LEARNER_RETRY_SAFETY_SECONDS,
+                server_delay + LEARNER_RETRY_SAFETY_SECONDS,
                 LEARNER_MAX_RETRY_SECONDS,
             ),
         )
@@ -1305,14 +1376,42 @@ class LearnerLanguage:
             except requests.RequestException as error:
                 raise LearnerLanguageError(f"Gemini {name} request failed: {error}") from error
             status_code = getattr(response, "status_code", None)
-            if status_code in {429, 500, 502, 503, 504} and attempt + 1 < LEARNER_MAX_RETRIES:
-                delay = gemini_retry_seconds(response)
-                if status_code != 429:
-                    delay = max(delay, min(10 * (2**attempt), LEARNER_MAX_RETRY_SECONDS))
-                issue = "rate-limited" if status_code == 429 else f"temporarily unavailable ({status_code})"
+            if status_code == 429:
+                retrying = attempt + 1 < LEARNER_MAX_RETRIES
+                server_retry_after = gemini_server_retry_seconds(response)
+                delay = (
+                    max(
+                        1.0,
+                        min(
+                            server_retry_after + LEARNER_RETRY_SAFETY_SECONDS,
+                            LEARNER_MAX_RETRY_SECONDS,
+                        ),
+                    )
+                    if server_retry_after is not None else 10.0
+                )
+                quota = gemini_quota_diagnostics(response)
                 logging.warning(
-                    "Gemini %s %s; retrying in %.1fs (%d/%d)",
-                    issue,
+                    "Gemini rate-limited %s model=%s attempt=%d/%d action=%s quota=%s "
+                    "server_retry_after=%s wait=%.1fs",
+                    name,
+                    self.model,
+                    attempt + 1,
+                    LEARNER_MAX_RETRIES,
+                    "retrying" if retrying else "retry budget exhausted",
+                    json.dumps(quota, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+                    if quota else "unavailable",
+                    f"{server_retry_after:.1f}s" if server_retry_after is not None else "unavailable",
+                    delay if retrying else 0.0,
+                )
+                if retrying:
+                    time.sleep(delay)
+                    continue
+            if status_code in {500, 502, 503, 504} and attempt + 1 < LEARNER_MAX_RETRIES:
+                delay = gemini_retry_seconds(response)
+                delay = max(delay, min(10 * (2**attempt), LEARNER_MAX_RETRY_SECONDS))
+                logging.warning(
+                    "Gemini temporarily unavailable (%s) %s; retrying in %.1fs (%d/%d)",
+                    status_code,
                     name,
                     delay,
                     attempt + 1,
@@ -1323,6 +1422,10 @@ class LearnerLanguage:
             try:
                 response.raise_for_status()
             except requests.HTTPError as error:
+                if status_code == 429:
+                    raise LearnerLanguageError(
+                        f"Gemini {name} request failed (429; rate limit); see structured quota log"
+                    ) from error
                 detail = re.sub(r"\s+", " ", response.text).strip()[:600]
                 error_type = LearnerTransientError if status_code in {500, 502, 503, 504} else LearnerLanguageError
                 raise error_type(
