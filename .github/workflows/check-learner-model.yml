@@ -23,6 +23,13 @@ on:
           - baseline
           - conservative
         default: baseline
+      ipa_batch_size:
+        description: IPA items per request; isolated qualification only
+        type: choice
+        options:
+          - '150'
+          - '75'
+        default: '150'
 permissions:
   contents: read
 jobs:
@@ -38,10 +45,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: python scripts/check_learner_model.py --scope "$QUALIFICATION_SCOPE" --date "$QUALIFICATION_DATE" --ipa-prompt "$QUALIFICATION_IPA_PROMPT"
+      - run: python scripts/check_learner_model.py --scope "$QUALIFICATION_SCOPE" --date "$QUALIFICATION_DATE" --ipa-prompt "$QUALIFICATION_IPA_PROMPT" --ipa-batch-size "$QUALIFICATION_IPA_BATCH_SIZE"
         env:
           QUALIFICATION_SCOPE: ${{ inputs.scope || 'sample' }}
           QUALIFICATION_DATE: ${{ inputs.date }}
           QUALIFICATION_IPA_PROMPT: ${{ inputs.ipa_prompt || 'baseline' }}
+          QUALIFICATION_IPA_BATCH_SIZE: ${{ inputs.ipa_batch_size || '150' }}
           BREVIARY_LEARNER_GEMINI_API_KEY: ${{ secrets.BREVIARY_LEARNER_GEMINI_API_KEY }}
           BREVIARY_LEARNER_GEMINI_MODEL: ${{ inputs.model }}

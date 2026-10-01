@@ -84,6 +84,7 @@ class QualificationTest(unittest.TestCase):
         original_cache = fetch.LEARNER_CACHE_FILE
         original_rpm = fetch.LEARNER_REQUESTS_PER_WINDOW
         original_prompt = fetch.LEARNER_IPA_INSTRUCTIONS
+        original_batch_size = fetch.LEARNER_GUIDANCE_BATCH_SIZE
 
         def check_isolation(language, date, root):
             self.assertEqual(language.models, ["candidate"])
@@ -91,18 +92,33 @@ class QualificationTest(unittest.TestCase):
             self.assertTrue(fetch.LEARNER_CACHE_FILE.is_relative_to(root))
             self.assertEqual(fetch.LEARNER_REQUESTS_PER_WINDOW, 4)
             self.assertEqual(fetch.LEARNER_IPA_INSTRUCTIONS, qualification.CONSERVATIVE_IPA_INSTRUCTIONS)
+            self.assertEqual(fetch.LEARNER_GUIDANCE_BATCH_SIZE, 75)
             return {"test": "isolated"}
 
         with patch.dict(os.environ, {fetch.LEARNER_GEMINI_API_KEY_ENV: "test-key",
                                     fetch.LEARNER_GEMINI_MODEL_ENV: "candidate",
                                     fetch.LEARNER_GEMINI_FALLBACK_MODELS_ENV: "production-fallback",
                                     "GITHUB_STEP_SUMMARY": ""}), patch(
-            "sys.argv", ["check_learner_model.py", "--scope", "full-day", "--date", "2026-10-01", "--ipa-prompt", "conservative"]
+            "sys.argv", ["check_learner_model.py", "--scope", "full-day", "--date", "2026-10-01", "--ipa-prompt", "conservative", "--ipa-batch-size", "75"]
         ), patch.object(qualification, "qualify_full_day", side_effect=check_isolation), patch("builtins.print"):
             qualification.main()
         self.assertEqual(fetch.LEARNER_CACHE_FILE, original_cache)
         self.assertEqual(fetch.LEARNER_REQUESTS_PER_WINDOW, original_rpm)
         self.assertEqual(fetch.LEARNER_IPA_INSTRUCTIONS, original_prompt)
+        self.assertEqual(fetch.LEARNER_GUIDANCE_BATCH_SIZE, original_batch_size)
+
+    def test_75_item_batches_cover_all_ids_and_warm_cache_without_requests(self):
+        language = fetch.LearnerLanguage("test-key", "candidate")
+        texts = [f"Qualification sentence number {index}." for index in range(151)]
+        with patch.object(fetch, "LEARNER_GUIDANCE_BATCH_SIZE", 75), patch.object(
+            fetch.LearnerLanguage, "request_json", autospec=True, side_effect=self.model_reply
+        ) as request:
+            cold = language.pronunciations(texts)
+            warm = fetch.LearnerLanguage("test-key", "candidate")
+            self.assertEqual(warm.pronunciations(texts), cold)
+        self.assertEqual(set(cold), set(texts))
+        self.assertEqual([len(call.args[4]["items"]) for call in request.call_args_list], [75, 75, 1])
+        self.assertEqual(warm.total_requests, 0)
 
     def test_lexical_checks_accept_connected_speech_and_reject_observed_errors(self):
         sources = [source for _, source, _ in qualification.IPA_REGRESSION_CASES]

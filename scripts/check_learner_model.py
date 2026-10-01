@@ -154,6 +154,16 @@ def qualify_full_day(language, date: datetime, root: Path) -> dict:
         glossary = paired_rows(str(glossary_rows[0]))[0]
         audit[prayer.slug] = {"source_rows": len(original), "glossary_rows": len(glossary_rows),
                              "ipa_samples": [rows[0], rows[len(original) // 2]], "glossary_sample": glossary}
+    # Preserve bounded diagnostic evidence even if the later quality gate fails.
+    logging.info("Full-day technical checks passed: %s", json.dumps({
+        "date": date_name, "model": language.model,
+        "ipa_batch_size": fetch.LEARNER_GUIDANCE_BATCH_SIZE,
+        "cold_requests": cold_requests, "cold_seconds": cold_seconds,
+        "warm_requests": warm.total_requests, "source_units": len(source_units),
+        "unique_source_units": len(set(source_units)), "kindle_pages": page_counts,
+        "encrypted_round_trip": "passed: both modes, root and dated",
+        "audit_samples": audit,
+    }, ensure_ascii=False))
     # Inspect actual full-day rows too, so a standalone small sample cannot
     # hide a recurrence of the same errors in a large batch. No repair/filtering.
     all_rows = dict(row for prayers in bodies.values() for body in prayers.values() for row in paired_rows(body))
@@ -166,6 +176,7 @@ def qualify_full_day(language, date: datetime, root: Path) -> dict:
     regression_guides = language.pronunciations([source for _, source, _ in IPA_REGRESSION_CASES])
     regression_samples = verify_ipa_regressions(regression_guides)
     return {"date": date_name, "model": language.model, "requests_per_minute": fetch.LEARNER_REQUESTS_PER_WINDOW,
+            "ipa_batch_size": fetch.LEARNER_GUIDANCE_BATCH_SIZE,
             "cold_requests": cold_requests, "cold_seconds": cold_seconds, "warm_requests": warm.total_requests,
             "source_units": len(source_units), "unique_source_units": len(set(source_units)),
             "regression_extra_requests": language.total_requests - regression_requests_before,
@@ -179,13 +190,14 @@ def main() -> None:
     parser.add_argument("--scope", choices=("sample", "full-day"), default="sample")
     parser.add_argument("--date", default="")
     parser.add_argument("--ipa-prompt", choices=("baseline", "conservative"), default="baseline")
+    parser.add_argument("--ipa-batch-size", type=int, choices=(75, 150), default=150)
     args = parser.parse_args()
     date = qualification_date(args.date)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     with tempfile.TemporaryDirectory(prefix="learner-qualification-") as directory:
         root = Path(directory)
         prompt = CONSERVATIVE_IPA_INSTRUCTIONS if args.ipa_prompt == "conservative" else fetch.LEARNER_IPA_INSTRUCTIONS
-        with patch.object(fetch, "CACHE_DIR", root / "cache"), patch.object(fetch, "LEARNER_CACHE_FILE", root / "cache" / "language.json"), patch.object(fetch, "LEARNER_REQUESTS_PER_WINDOW", 4), patch.object(fetch, "LEARNER_IPA_INSTRUCTIONS", prompt), patch.dict(os.environ, {fetch.LEARNER_GEMINI_FALLBACK_MODELS_ENV: ""}):
+        with patch.object(fetch, "CACHE_DIR", root / "cache"), patch.object(fetch, "LEARNER_CACHE_FILE", root / "cache" / "language.json"), patch.object(fetch, "LEARNER_REQUESTS_PER_WINDOW", 4), patch.object(fetch, "LEARNER_IPA_INSTRUCTIONS", prompt), patch.object(fetch, "LEARNER_GUIDANCE_BATCH_SIZE", args.ipa_batch_size), patch.dict(os.environ, {fetch.LEARNER_GEMINI_FALLBACK_MODELS_ENV: ""}):
             language = fetch.LearnerLanguage(os.environ[fetch.LEARNER_GEMINI_API_KEY_ENV])
             if args.scope == "full-day":
                 result = qualify_full_day(language, date, root)
