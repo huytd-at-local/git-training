@@ -112,6 +112,10 @@ class QualificationTest(unittest.TestCase):
         variants = {sources[0]: "wiː preɪz juː ðə lɔːd ɡɒd ɔːlˈmaɪtɪ",
                     sources[1]: "bʌt wɔtˈɛvə ɡeɪnz bəˈkəz əv kraɪst"}
         self.assertEqual(len(qualification.verify_ipa_regressions(variants)), 2)
+        # The live candidate's PRICE vowel spelling alone is not our finding.
+        # With praise repaired, this variation must not cause a false failure.
+        variants[sources[0]] = "wiː preɪz juː ðə lɔːd gɒd ɔːlmɑɪtiː"
+        self.assertEqual(len(qualification.verify_ipa_regressions(variants)), 2)
         for source, bad_guide in ((sources[0], "wiː preɪ juː ðə lɔːd ɡɒd ˈɔːlməti"),
                                   (sources[1], "bʌt wʌbˈevə ɡeɪnz bɪˈkɒv əv kraɪst")):
             with self.subTest(source=source), self.assertRaisesRegex(ValueError, "lexical regressions failed"):

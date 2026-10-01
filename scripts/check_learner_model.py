@@ -39,7 +39,7 @@ CONSERVATIVE_IPA_INSTRUCTIONS = (
 # Accept light linking, dark l and glottal t; do not enforce one exact whole guide.
 IPA_REGRESSION_CASES = (
     ("almighty-and-praise", "We praise you, the Lord God Almighty, *",
-     (r"ɔː[lɫ][ˈˌ]?maɪ[tʔ][iɪ]", r"preɪ[zʒ]")),
+     (r"ɔː[lɫ][ˈˌ]?m[aɑ]ɪ[tʔ][iɪ]", r"preɪ[zʒ]")),
     ("whatever-and-because", "But whatever gains I had, these I have come to consider a loss because of Christ.",
      (r"w[ɒɔ]ˈ?[tʔ]ˈ?[eɛ]və", r"b[ɪə]ˈ?k[ɒə]z[\s‿ˈˌ]*(?:əv|ɒv)")),
 )
