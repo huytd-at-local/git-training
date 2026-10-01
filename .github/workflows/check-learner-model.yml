@@ -5,19 +5,35 @@ on:
       model:
         required: true
         default: gemini-3.6-flash
+      scope:
+        description: Sample or complete cold-cache daily workload (no deploy)
+        type: choice
+        options:
+          - sample
+          - full-day
+        default: sample
+      date:
+        description: YYYY-MM-DD; empty means today in Vietnam
+        required: false
+        default: ''
 permissions:
   contents: read
 jobs:
   sample:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
-      - run: python scripts/check_learner_model.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python scripts/check_learner_model.py --scope "$QUALIFICATION_SCOPE" --date "$QUALIFICATION_DATE"
         env:
+          QUALIFICATION_SCOPE: ${{ inputs.scope || 'sample' }}
+          QUALIFICATION_DATE: ${{ inputs.date }}
           BREVIARY_LEARNER_GEMINI_API_KEY: ${{ secrets.BREVIARY_LEARNER_GEMINI_API_KEY }}
           BREVIARY_LEARNER_GEMINI_MODEL: ${{ inputs.model }}
