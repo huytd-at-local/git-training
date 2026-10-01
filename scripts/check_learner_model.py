@@ -3,6 +3,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import tempfile
 import time
 from datetime import datetime
@@ -13,6 +14,51 @@ if __package__:
     from . import fetch
 else:
     import fetch
+
+
+# Candidate prompt only: production fetch.py and its cache/profile stay unchanged.
+CONSERVATIVE_IPA_INSTRUCTIONS = (
+    "Transcribe every supplied English item into accurate contemporary Southern British "
+    "non-rhotic IPA for relaxed but clear connected speech. Preserve every spoken word "
+    "and its lexical identity, stressed vowels/diphthongs and normal lexical stress. "
+    "Use ordinary weak forms for unstressed function words and natural linking between "
+    "words. Light consonant elision is optional only in familiar unstressed consonant "
+    "clusters; never invent consonant substitutions or delete/change a content word's "
+    "stressed vowel. If unsure about a reduction, use the normal British pronunciation "
+    "in connected speech instead of an exaggerated reduction. Check each transcription "
+    "against its own source text before returning it. Use IPA primary/secondary stress "
+    "marks and separate IPA symbols tʃ and dʒ, not ligatures. Speak written numbers as "
+    "English words. Do not pronounce non-spoken liturgical symbols +, *, or dagger marks; "
+    "do not copy digits, parentheses, brackets, colon labels or quotation marks into IPA. "
+    "Use ordinary IPA spaces and stress/length marks. Return only the IPA guide for each "
+    "supplied id, without slashes, brackets, labels, explanations, markdown, capital "
+    "letters or respelling. Do not paraphrase, substitute names, or omit spoken content."
+)
+
+# Bounded lexical checks for the observed failures, not a general IPA evaluator.
+# Accept light linking, dark l and glottal t; do not enforce one exact whole guide.
+IPA_REGRESSION_CASES = (
+    ("almighty-and-praise", "We praise you, the Lord God Almighty, *",
+     (r"ɔː[lɫ][ˈˌ]?maɪ[tʔ][iɪ]", r"preɪ[zʒ]")),
+    ("whatever-and-because", "But whatever gains I had, these I have come to consider a loss because of Christ.",
+     (r"w[ɒɔ]ˈ?[tʔ]ˈ?[eɛ]və", r"b[ɪə]ˈ?k[ɒə]z[\s‿ˈˌ]*(?:əv|ɒv)")),
+)
+
+
+def verify_ipa_regressions(guides: dict[str, str]) -> list[dict]:
+    samples = []
+    failures = []
+    for name, source, patterns in IPA_REGRESSION_CASES:
+        guide = guides.get(source, "")
+        passed = all(re.search(pattern, guide) for pattern in patterns)
+        samples.append({"case": name, "source": source, "guide": guide,
+                        "lexical_checks": "passed" if passed else "failed"})
+        if not passed:
+            failures.append(name)
+    logging.info("IPA lexical regression samples: %s", json.dumps(samples, ensure_ascii=False))
+    if failures:
+        raise ValueError("IPA lexical regressions failed: " + ", ".join(failures))
+    return samples
 
 
 def qualification_date(value: str) -> datetime:
@@ -108,9 +154,22 @@ def qualify_full_day(language, date: datetime, root: Path) -> dict:
         glossary = paired_rows(str(glossary_rows[0]))[0]
         audit[prayer.slug] = {"source_rows": len(original), "glossary_rows": len(glossary_rows),
                              "ipa_samples": [rows[0], rows[len(original) // 2]], "glossary_sample": glossary}
+    # Inspect actual full-day rows too, so a standalone small sample cannot
+    # hide a recurrence of the same errors in a large batch. No repair/filtering.
+    all_rows = dict(row for prayers in bodies.values() for body in prayers.values() for row in paired_rows(body))
+    present = [source for _, source, _ in IPA_REGRESSION_CASES if source in all_rows]
+    for name, source, patterns in IPA_REGRESSION_CASES:
+        if source in all_rows and not all(re.search(pattern, all_rows[source]) for pattern in patterns):
+            logging.error("Full-day IPA regression: %s source=%r guide=%r", name, source, all_rows[source])
+            raise ValueError(f"Full-day IPA lexical regression failed: {name}")
+    regression_requests_before = language.total_requests
+    regression_guides = language.pronunciations([source for _, source, _ in IPA_REGRESSION_CASES])
+    regression_samples = verify_ipa_regressions(regression_guides)
     return {"date": date_name, "model": language.model, "requests_per_minute": fetch.LEARNER_REQUESTS_PER_WINDOW,
             "cold_requests": cold_requests, "cold_seconds": cold_seconds, "warm_requests": warm.total_requests,
             "source_units": len(source_units), "unique_source_units": len(set(source_units)),
+            "regression_extra_requests": language.total_requests - regression_requests_before,
+            "regressions_present_in_full_day": len(present), "ipa_regression_samples": regression_samples,
             "encrypted_round_trip": "passed: both modes, root and dated", "kindle_pages": page_counts,
             "audit_samples": audit, "automated_gate": "passed", "manual_quality_review": "required"}
 
@@ -119,12 +178,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scope", choices=("sample", "full-day"), default="sample")
     parser.add_argument("--date", default="")
+    parser.add_argument("--ipa-prompt", choices=("baseline", "conservative"), default="baseline")
     args = parser.parse_args()
     date = qualification_date(args.date)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     with tempfile.TemporaryDirectory(prefix="learner-qualification-") as directory:
         root = Path(directory)
-        with patch.object(fetch, "CACHE_DIR", root / "cache"), patch.object(fetch, "LEARNER_CACHE_FILE", root / "cache" / "language.json"), patch.object(fetch, "LEARNER_REQUESTS_PER_WINDOW", 4), patch.dict(os.environ, {fetch.LEARNER_GEMINI_FALLBACK_MODELS_ENV: ""}):
+        prompt = CONSERVATIVE_IPA_INSTRUCTIONS if args.ipa_prompt == "conservative" else fetch.LEARNER_IPA_INSTRUCTIONS
+        with patch.object(fetch, "CACHE_DIR", root / "cache"), patch.object(fetch, "LEARNER_CACHE_FILE", root / "cache" / "language.json"), patch.object(fetch, "LEARNER_REQUESTS_PER_WINDOW", 4), patch.object(fetch, "LEARNER_IPA_INSTRUCTIONS", prompt), patch.dict(os.environ, {fetch.LEARNER_GEMINI_FALLBACK_MODELS_ENV: ""}):
             language = fetch.LearnerLanguage(os.environ[fetch.LEARNER_GEMINI_API_KEY_ENV])
             if args.scope == "full-day":
                 result = qualify_full_day(language, date, root)
@@ -134,6 +195,7 @@ def main() -> None:
                              "Have mercy on us and forgive us our sins.", "Let us give thanks to the Lord our God."]
                 result = {"model": language.model, "ipa": language.pronunciations(sentences),
                           "glossary": language.glossary("Morning Prayer", " ".join(sentences))}
+            result["ipa_prompt"] = args.ipa_prompt
             encoded = json.dumps(result, ensure_ascii=False, indent=2)
             print(encoded)
             summary = os.environ.get("GITHUB_STEP_SUMMARY")

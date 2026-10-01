@@ -16,6 +16,13 @@ on:
         description: YYYY-MM-DD; empty means today in Vietnam
         required: false
         default: ''
+      ipa_prompt:
+        description: Production baseline or isolated conservative candidate
+        type: choice
+        options:
+          - baseline
+          - conservative
+        default: baseline
 permissions:
   contents: read
 jobs:
@@ -31,9 +38,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: python scripts/check_learner_model.py --scope "$QUALIFICATION_SCOPE" --date "$QUALIFICATION_DATE"
+      - run: python scripts/check_learner_model.py --scope "$QUALIFICATION_SCOPE" --date "$QUALIFICATION_DATE" --ipa-prompt "$QUALIFICATION_IPA_PROMPT"
         env:
           QUALIFICATION_SCOPE: ${{ inputs.scope || 'sample' }}
           QUALIFICATION_DATE: ${{ inputs.date }}
+          QUALIFICATION_IPA_PROMPT: ${{ inputs.ipa_prompt || 'baseline' }}
           BREVIARY_LEARNER_GEMINI_API_KEY: ${{ secrets.BREVIARY_LEARNER_GEMINI_API_KEY }}
           BREVIARY_LEARNER_GEMINI_MODEL: ${{ inputs.model }}
