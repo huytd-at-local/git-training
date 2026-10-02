@@ -54,11 +54,17 @@ tiếng Việt; lỗi phụ vẫn xuất hiện dưới dạng warning trong Git
 Lượt dự phòng tự phục hồi learner nếu thiếu ngày hiện tại; nếu đã có thì tái sử dụng
 bản mã hóa, không gọi Gemini. Actions summary báo ngày yêu cầu, ngày có sẵn và
 trạng thái refresh/reuse/fallback riêng cho hai bản learner.
+Client giới hạn tổng cộng 4 request / 60 giây trong mỗi lượt, gồm retry HTTP,
+repair và fallback, để giữ khoảng đệm dưới quota 5 RPM của các model Flash
+production được xác nhận trong AI Studio ngày 02/10/2026. Đây không phải bộ
+đếm RPD: project Free tier hiện có 20 request/ngày/model, dùng chung giữa các
+key và các lượt manual/qualification. Giảm RPM không khắc phục lỗi upstream 503.
 Nếu model chính hết retry do lỗi server/kết nối tạm thời, biến
-`BREVIARY_LEARNER_FALLBACK_MODEL` cho phép chuyển sang model dự phòng cho phần
-còn lại của lượt. Actions dùng `gemini-3.6-flash` sau khi kiểm chứng mẫu IPA/glossary;
+`BREVIARY_LEARNER_FALLBACK_MODELS` cho phép chuyển lần lượt sang model dự phòng
+cho phần còn lại của lượt. Actions giữ chuỗi `gemini-3.7-flash` → `gemini-3.6-flash`
+→ `gemini-3.5-flash`, chỉ đi một chiều và không quay lại model đã lỗi;
 không chuyển model khi lỗi xác thực, request sai hoặc quota 429. Ngân sách mỗi
-lượt sinh ngôn ngữ là 15 phút / 120 request, dùng chung cho cả hai model.
+lượt sinh ngôn ngữ là 15 phút / 120 request, dùng chung cho toàn bộ chuỗi model.
 Job `learner-freshness` kiểm tra artifact độc lập; có thể báo đỏ vì learner cũ
 trong khi job deploy Reading vẫn thành công.
 
@@ -112,7 +118,13 @@ Chrome vẫn dùng rendering engine hiện đại nên kết quả cuối cùng 
 5. Vào tab `Actions` chạy workflow `Pages` thủ công lần đầu bằng `workflow_dispatch`, hoặc chờ push tự chạy.
 6. Mở URL GitHub Pages được workflow trả ra.
 
-Workflow cũng tự chạy hằng ngày lúc 00:05 giờ Việt Nam. Cron UTC tương ứng là `5 17 * * *`.
+Workflow chạy hằng ngày lúc 00:23, 01:17 và 15:23 giờ Việt Nam; cron UTC lần lượt
+là `23 17 * * *`, `17 18 * * *` và `23 8 * * *`. GitHub có thể chạy cron trễ.
+Lượt 00:23 buộc refresh learner; hai lượt dự phòng và `Run workflow` thủ công
+dùng `missing`, chỉ sinh lại nếu thiếu ngày hiện tại hoặc profile đã cũ.
+Push lên `main` không buộc sinh learner. Recovery 15:23 nằm sau thời điểm reset
+RPD lúc nửa đêm Pacific cả PST lẫn PDT, tạo thêm cơ hội phục hồi khi hai lượt
+ban đêm gặp 503; không bảo đảm dịch vụ sẽ sẵn sàng hoặc còn đủ quota.
 Mỗi lần tạo site thành công, script chỉ giữ nội dung của hôm qua, hôm nay và ngày mai.
 
 ## Debug lỗi parse

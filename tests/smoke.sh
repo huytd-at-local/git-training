@@ -29,6 +29,7 @@ grep -q "artifact.name === 'github-pages' && !artifact.expired" .github/workflow
 grep -q 'retention-days: 7' .github/workflows/pages.yml
 grep -q 'cron: "23 17 \* \* \*"' .github/workflows/pages.yml
 grep -q 'cron: "17 18 \* \* \*"' .github/workflows/pages.yml
+grep -q 'cron: "23 8 \* \* \*"' .github/workflows/pages.yml
 ! grep -q 'breviary-learner-language-v2.json' .github/workflows/pages.yml
 grep -q 'actions/upload-pages-artifact@v4' .github/workflows/pages.yml
 grep -q 'actions/deploy-pages@v4' .github/workflows/pages.yml
@@ -243,6 +244,7 @@ for event_name, schedule, expected in (
     ("workflow_dispatch", None, "missing"),
     ("schedule", "23 17 * * *", "1"),
     ("schedule", "17 18 * * *", "missing"),
+    ("schedule", "23 8 * * *", "missing"),
     ("push", None, "0"),
 ):
     if learner_refresh_result(event_name, schedule) != expected:
@@ -615,8 +617,10 @@ if malformed_quota_language.model != "gemini-test":
 if "MALFORMED_BODY_SENTINEL" in malformed_quota_log or "quota=unavailable" not in malformed_quota_log:
     raise SystemExit("Malformed Gemini quota diagnostics exposed raw response content")
 
-# Semantic repairs can push a nominal build above the upstream 20 RPM quota.
+# Semantic repairs can push a nominal build above the upstream 5 RPM quota.
 # The client must throttle proactively, not wait for a 429 to discover it.
+if fetch_module.LEARNER_REQUESTS_PER_WINDOW != 4 or fetch_module.LEARNER_REQUEST_WINDOW_SECONDS != 60.0:
+    raise SystemExit("Learner request limiter lost its 4-per-minute safety margin")
 rate_limited_language = LearnerLanguage("test-key", "gemini-test")
 rate_limited_language.request_timestamps = [0.0] * fetch_module.LEARNER_REQUESTS_PER_WINDOW
 rate_limit_clock = [30.0]

@@ -11,6 +11,9 @@ on:
     # A second refresh recovers a missing learner date if the first
     # scheduled run is delayed or an upstream service is temporarily down.
     - cron: "17 18 * * *"
+    # 15:23 Vietnam time: recover a missing date after Pacific midnight's
+    # daily-quota reset in both PST and PDT, well apart from the night runs.
+    - cron: "23 8 * * *"
 
 permissions:
   actions: read

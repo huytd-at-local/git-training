@@ -494,14 +494,13 @@ LEARNER_RIGHT_CHARS_PER_LINE = 22
 # Each table-cell has 5px top and bottom padding in the production CSS.
 LEARNER_ROW_SPACING_UNITS = round(10.0 / LEARNER_LINE_HEIGHT_PX, 2)
 LEARNER_MAX_FRAGMENT_CHARS = 92
-# The Gemini free tier currently exposes a 20-requests-per-minute ceiling for
-# this project.  A current-day learner build can contain about 925 distinct
-# source lines.  The nominal build stays below that ceiling, but semantic
-# repairs for omitted or invalid items can add requests.  Keep an explicit
-# safety margin so a cold cache cannot burst through the upstream quota.
+# AI Studio showed a 5-RPM ceiling for this project's production Flash models
+# on 2026-10-02. Keep a one-request margin; HTTP retries, semantic repairs and
+# fallback calls all share this rolling window. This is not a daily-quota
+# counter and cannot prevent upstream 503 capacity failures.
 LEARNER_GUIDANCE_BATCH_SIZE = 150
 LEARNER_GLOSSARY_BATCH_SIZE = 12
-LEARNER_REQUESTS_PER_WINDOW = 15
+LEARNER_REQUESTS_PER_WINDOW = 4
 LEARNER_REQUEST_WINDOW_SECONDS = 60.0
 LEARNER_RETRY_SAFETY_SECONDS = 2.0
 LEARNER_MAX_RETRIES = 3
