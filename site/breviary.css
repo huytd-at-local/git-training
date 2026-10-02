@@ -901,16 +901,6 @@ code {
       margin: 0;
     }
 
-    .learner-page .learner-glossary {
-      margin-top: 22px;
-      padding-top: 4px;
-      border-top: 1px solid #777;
-    }
-
-    .learner-page .learner-glossary h2 {
-      margin-top: 14px;
-    }
-
     /* Modern Learner presentation. Keep these selectors independent from
        .learner-page so the calibrated Kindle layout cannot leak across. */
     .learner-responsive-page {
@@ -984,12 +974,6 @@ code {
     .learner-responsive-page .learner-english p,
     .learner-responsive-page .learner-pronunciation p {
       margin: 0;
-    }
-
-    .learner-responsive-page .learner-glossary {
-      margin-top: 28px;
-      padding-top: 8px;
-      border-top: 1px solid #777;
     }
 
     .learner-responsive-page .responsive-nav {

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import html
 import json
 import logging
@@ -12,7 +11,6 @@ import re
 import shutil
 import subprocess
 import sys
-import time
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -29,13 +27,9 @@ SOURCE_URL = "https://ktcgkpv.org/readings/prayer"
 IBREVIARY_URL = "https://www.ibreviary.com/m2/"
 IBREVIARY_OPTIONS_URL = urljoin(IBREVIARY_URL, "opzioni.php")
 ENGLISH_BREVIARY_PASSCODE_ENV = "BREVIARY_EN_PASSCODE"
-LEARNER_GEMINI_API_KEY_ENV = "BREVIARY_LEARNER_GEMINI_API_KEY"
-LEARNER_GEMINI_MODEL_ENV = "BREVIARY_LEARNER_GEMINI_MODEL"
-LEARNER_GEMINI_FALLBACK_MODELS_ENV = "BREVIARY_LEARNER_FALLBACK_MODELS"
-LEARNER_REFRESH_ENV = "BREVIARY_REFRESH_LEARNER"
-LEARNER_GEMINI_DEFAULT_MODEL = "gemini-3.7-flash"
-GEMINI_GENERATE_CONTENT_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-LEARNER_PRONUNCIATION_PROFILE = "casual-british-ipa-v1"
+ESPEAK_NG_VERSION = "1.52.0"
+ESPEAK_NG_VOICE = "en-GB-x-rp"
+LEARNER_PRONUNCIATION_PROFILE = "espeak-ng-1-52-rp-v1"
 LEARNER_PROFILE_CLASS = f"learner-profile-{LEARNER_PRONUNCIATION_PROFILE}"
 LEARNER_RESPONSIVE_PROFILE = "learner-responsive-v1"
 LEARNER_RESPONSIVE_PROFILE_CLASS = f"learner-responsive-profile-{LEARNER_RESPONSIVE_PROFILE}"
@@ -103,7 +97,6 @@ ENGLISH_SESSION_KEY = "breviary-en-key-v1"
 ENGLISH_LEARNER_SESSION_KEY = "breviary-en-learner-key-v1"
 ENGLISH_LEARNER_RESPONSIVE_SESSION_KEY = "breviary-en-learner-responsive-key-v1"
 ENCRYPT_HELPER = ROOT / "scripts" / "encrypt_breviary.js"
-DECRYPT_HELPER = ROOT / "scripts" / "decrypt_breviary.js"
 
 BREVIARY_CSS = """
 /* Monastic Breviary: ornament only; production pagination metrics stay unchanged. */
@@ -308,16 +301,6 @@ BREVIARY_CSS = """
       margin: 0;
     }
 
-    .learner-page .learner-glossary {
-      margin-top: 22px;
-      padding-top: 4px;
-      border-top: 1px solid #777;
-    }
-
-    .learner-page .learner-glossary h2 {
-      margin-top: 14px;
-    }
-
     /* Modern Learner presentation. Keep these selectors independent from
        .learner-page so the calibrated Kindle layout cannot leak across. */
     .learner-responsive-page {
@@ -391,12 +374,6 @@ BREVIARY_CSS = """
     .learner-responsive-page .learner-english p,
     .learner-responsive-page .learner-pronunciation p {
       margin: 0;
-    }
-
-    .learner-responsive-page .learner-glossary {
-      margin-top: 28px;
-      padding-top: 8px;
-      border-top: 1px solid #777;
     }
 
     .learner-responsive-page .responsive-nav {
@@ -494,35 +471,6 @@ LEARNER_RIGHT_CHARS_PER_LINE = 22
 # Each table-cell has 5px top and bottom padding in the production CSS.
 LEARNER_ROW_SPACING_UNITS = round(10.0 / LEARNER_LINE_HEIGHT_PX, 2)
 LEARNER_MAX_FRAGMENT_CHARS = 92
-# AI Studio showed a 5-RPM ceiling for this project's production Flash models
-# on 2026-10-02. Keep a one-request margin; HTTP retries, semantic repairs and
-# fallback calls all share this rolling window. This is not a daily-quota
-# counter and cannot prevent upstream 503 capacity failures.
-LEARNER_GUIDANCE_BATCH_SIZE = 150
-LEARNER_GLOSSARY_BATCH_SIZE = 12
-LEARNER_REQUESTS_PER_WINDOW = 4
-LEARNER_REQUEST_WINDOW_SECONDS = 60.0
-LEARNER_RETRY_SAFETY_SECONDS = 2.0
-LEARNER_MAX_RETRIES = 3
-LEARNER_MAX_RETRY_SECONDS = 75
-LEARNER_CACHE_FILE = CACHE_DIR / "breviary-learner-language-v3.json"
-
-LEARNER_IPA_INSTRUCTIONS = (
-    "Transcribe each English item in casual, contemporary British English using only the "
-    "International Phonetic Alphabet (IPA). Model smooth natural connected speech in a "
-    "standard Southern British/non-rhotic accent: use normal weak forms and reductions, join "
-    "linked words where that makes the connection clear, and show a small amount of ordinary "
-    "sound deletion. Preserve the supplied wording; do not paraphrase or omit content beyond "
-    "natural connected-speech deletion. Use IPA primary and secondary stress marks. Return the "
-    "transcription alone, without slashes, brackets, respelling, translations, explanations, "
-    "labels, markdown, or capital letters. Example: 'The IPA is designed to represent those "
-    "qualities of speech that are part of lexical' becomes 'ði ˌaɪ piː ˈeɪ ɪz dɪˈzaɪn tə "
-    "ˌreprɪˈzent ðəʊz ˈkwɒlətiz əv spiːtʃ ðətə ˈpɑːtəv ˈleksɪkəl'."
-)
-LEARNER_IPA_EVIDENCE = frozenset("ɑɒæʌəɜɛɪʊɔŋθðʃʒɡɹɾʔˈˌː")
-LEARNER_IPA_SYMBOLS = frozenset("abdefghijklmnoprstuvwzɑɒæʌəɜɛɪʊɔŋθðʃʒɡɹɾʔɐɫɚɝɨʉʍɱɳʰʲˈˌːˑ‿\u0329\u032f .,!;?—-")
-LEARNER_IPA_VOWELS = frozenset("aeiouɑɒæʌəɜɛɪʊɔɐɚɝɨʉ\u0329")
-VIETNAMESE_PRONUNCIATION_MARKS = frozenset("\u0300\u0301\u0302\u0303\u0306\u0309\u031b\u0323")
 
 LABEL_PATTERNS = [
     r"^ĐC\b",
@@ -691,7 +639,7 @@ def reader_modes() -> tuple[ReaderMode, ...]:
             "en-learner",
             "English",
             "Learner · Kindle",
-            "Paginated English and casual British IPA for Kindle.",
+            "Paginated English and British RP IPA generated locally with eSpeak NG for Kindle.",
             "breviary/en/learner/index.html",
             "breviary/en/learner/{date}/index.html",
         ),
@@ -1079,12 +1027,59 @@ def fragment_soup(fragment: str | None) -> BeautifulSoup:
     return BeautifulSoup(f"<div>{fragment or ''}</div>", "lxml")
 
 
-class LearnerLanguageError(RuntimeError):
-    """Raised when the build-time language enrichment is unavailable or invalid."""
+class LearnerBuildError(RuntimeError):
+    """Raised when local learner generation is unavailable or invalid."""
 
 
-class LearnerTransientError(LearnerLanguageError):
-    """Transport/server outage eligible for the configured alternate model."""
+def run_espeak_ng(arguments: list[str], *, text: str | None = None) -> str:
+    """Call the local engine without interpreting source text as arguments."""
+    try:
+        result = subprocess.run(
+            ["espeak-ng", *arguments],
+            input=text,
+            encoding="utf-8",
+            capture_output=True,
+            check=True,
+            shell=False,
+            timeout=TIMEOUT_SECONDS,
+        )
+    except FileNotFoundError as error:
+        raise LearnerBuildError(
+            f"English learner requires espeak-ng {ESPEAK_NG_VERSION} on PATH"
+        ) from error
+    except subprocess.CalledProcessError as error:
+        raise LearnerBuildError(
+            f"English learner espeak-ng failed (exit {error.returncode}): "
+            f"{(error.stderr or '').strip()}"
+        ) from error
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise LearnerBuildError(f"English learner espeak-ng could not run: {error}") from error
+    return result.stdout
+
+
+def require_espeak_ng() -> None:
+    """Reject missing or different upstream versions before generating IPA."""
+    output = run_espeak_ng(["--version"])
+    match = re.search(r"eSpeak NG text-to-speech: (\S+)", output)
+    version = match.group(1) if match else "unknown"
+    if version != ESPEAK_NG_VERSION:
+        raise LearnerBuildError(
+            f"English learner requires eSpeak NG {ESPEAK_NG_VERSION}; found {version}"
+        )
+
+
+def espeak_ipa(text: str) -> str:
+    output = run_espeak_ng(["-q", "--ipa", "-v", ESPEAK_NG_VOICE, "--stdin"], text=text)
+    ipa = " ".join(output.split())
+    if not ipa:
+        raise LearnerBuildError("English learner espeak-ng returned empty IPA")
+    return ipa
+
+
+def espeak_pronunciations(texts: Iterable[str]) -> dict[str, str]:
+    """Generate each exact fragment once in this preparation pass."""
+    require_espeak_ng()
+    return {text: espeak_ipa(text) for text in dict.fromkeys(texts)}
 
 
 def github_actions_warning(title: str, message: str) -> None:
@@ -1094,575 +1089,6 @@ def github_actions_warning(title: str, message: str) -> None:
     escaped_title = title.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
     escaped_message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
     print(f"::warning title={escaped_title}::{escaped_message}")
-
-
-def learner_cache_key(value: str) -> str:
-    normalized = re.sub(r"\s+", " ", value).strip().casefold()
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-
-
-def validate_casual_british_ipa(source_text: str, guide: str) -> str:
-    """Reject legacy respelling or decorated model output before it reaches Kindle."""
-    value = re.sub(r"\s+", " ", guide).strip()
-    decomposed = unicodedata.normalize("NFD", value)
-    has_vietnamese_spelling = "đ" in value.casefold() or any(
-        mark in VIETNAMESE_PRONUNCIATION_MARKS for mark in decomposed
-    )
-    reason = None
-    if not value:
-        reason = "empty guide"
-    elif len(value) > 500:
-        reason = "guide exceeds 500 characters"
-    elif has_vietnamese_spelling:
-        reason = "Vietnamese respelling or tone marks"
-    elif any(character not in LEARNER_IPA_SYMBOLS for character in value):
-        reason = "unsupported IPA characters, decoration or prose"
-    elif not any(character in LEARNER_IPA_VOWELS for character in value):
-        reason = "no vowel or syllabic nucleus"
-    elif value.isascii() and re.search(r"ai|ei|oi|ou|th|sh|ch", value):
-        reason = "ASCII respelling digraphs instead of IPA symbols"
-    else:
-        source_words = re.findall(r"[a-z]+", source_text.casefold())
-        # Short forms can legitimately equal English spelling (men, help, let us).
-        # A long verbatim ASCII sentence is instead suspicious copied prose.
-        if (len(source_words) >= 4 and value.isascii()
-                and re.findall(r"[a-z]+", value) == source_words):
-            reason = "long verbatim source instead of transcription"
-    if reason:
-        raise LearnerLanguageError(f"Casual British IPA response is invalid: {reason}")
-    return value
-
-
-def load_learner_language_cache() -> dict[str, dict]:
-    empty = {"pronunciations": {}, "glossaries": {}}
-    if not LEARNER_CACHE_FILE.exists():
-        return empty
-    try:
-        loaded = json.loads(LEARNER_CACHE_FILE.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        logging.warning("Ignoring invalid learner language cache: %s", error)
-        return empty
-    if not isinstance(loaded, dict):
-        return empty
-    return {
-        "pronunciations": loaded.get("pronunciations", {}) if isinstance(loaded.get("pronunciations"), dict) else {},
-        "glossaries": loaded.get("glossaries", {}) if isinstance(loaded.get("glossaries"), dict) else {},
-    }
-
-
-def gemini_response_text(response: dict) -> str:
-    candidates = response.get("candidates")
-    if not isinstance(candidates, list) or not candidates:
-        raise LearnerLanguageError("Gemini response did not contain a candidate")
-    content = candidates[0].get("content") if isinstance(candidates[0], dict) else None
-    parts = content.get("parts") if isinstance(content, dict) else None
-    if not isinstance(parts, list):
-        raise LearnerLanguageError("Gemini response did not contain text parts")
-    value = "".join(
-        item.get("text", "") for item in parts if isinstance(item, dict) and isinstance(item.get("text"), str)
-    ).strip()
-    if not value:
-        raise LearnerLanguageError("Gemini response did not contain text output")
-    return value
-
-
-def _gemini_error_details(response: requests.Response) -> list[dict]:
-    response_json = getattr(response, "json", None)
-    if not callable(response_json):
-        return []
-    try:
-        body = response_json()
-    except (ValueError, requests.RequestException):
-        return []
-    error = body.get("error") if isinstance(body, dict) else None
-    details = error.get("details") if isinstance(error, dict) else None
-    return [detail for detail in details if isinstance(detail, dict)] if isinstance(details, list) else []
-
-
-def _safe_gemini_diagnostic_text(value: object) -> str | None:
-    if not isinstance(value, str):
-        return None
-    cleaned = re.sub(r"\s+", " ", value).strip()
-    return cleaned[:160] or None
-
-
-def gemini_quota_diagnostics(response: requests.Response) -> list[dict[str, object]]:
-    """Return a small allow-list of structured quota fields, never raw error text."""
-    quota_details: list[dict[str, object]] = []
-    for detail in _gemini_error_details(response):
-        detail_type = detail.get("@type")
-        if not isinstance(detail_type, str) or not detail_type.endswith("google.rpc.QuotaFailure"):
-            continue
-        violations = detail.get("violations")
-        if not isinstance(violations, list):
-            continue
-        for violation in violations:
-            if not isinstance(violation, dict):
-                continue
-            diagnostic: dict[str, object] = {}
-            for key in ("quotaMetric", "quotaId", "quotaValue"):
-                safe_value = _safe_gemini_diagnostic_text(violation.get(key))
-                if safe_value is not None:
-                    diagnostic[key] = safe_value
-            dimensions = violation.get("quotaDimensions")
-            if isinstance(dimensions, dict):
-                safe_dimensions = {
-                    key: safe_value
-                    for key in ("model", "location")
-                    if (safe_value := _safe_gemini_diagnostic_text(dimensions.get(key))) is not None
-                }
-                if safe_dimensions:
-                    diagnostic["quotaDimensions"] = safe_dimensions
-            if diagnostic:
-                quota_details.append(diagnostic)
-            if len(quota_details) == 5:
-                return quota_details
-    return quota_details
-
-
-def gemini_server_retry_seconds(response: requests.Response) -> float | None:
-    retry_after = getattr(response, "headers", {}).get("retry-after", "").strip()
-    candidates: list[float] = []
-    try:
-        candidates.append(float(retry_after))
-    except ValueError:
-        pass
-    match = re.search(
-        r"retry in\s+(\d+(?:\.\d+)?)s",
-        getattr(response, "text", ""),
-        flags=re.IGNORECASE,
-    )
-    if match:
-        candidates.append(float(match.group(1)))
-    for detail in _gemini_error_details(response):
-        detail_type = detail.get("@type")
-        retry_delay = detail.get("retryDelay")
-        if isinstance(detail_type, str) and detail_type.endswith("google.rpc.RetryInfo"):
-            if isinstance(retry_delay, str):
-                match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)s\s*", retry_delay)
-                if match:
-                    candidates.append(float(match.group(1)))
-    return max(candidates) if candidates else None
-
-
-def gemini_retry_seconds(response: requests.Response) -> float:
-    server_delay = gemini_server_retry_seconds(response)
-    if server_delay is not None:
-        return max(
-            1.0,
-            min(
-                server_delay + LEARNER_RETRY_SAFETY_SECONDS,
-                LEARNER_MAX_RETRY_SECONDS,
-            ),
-        )
-    return 10.0
-
-
-class LearnerLanguage:
-    """Build-time British pronunciation and beginner glossary generator.
-
-    Its cache stays under .cache so source text and model output never become a
-    separate public, unencrypted website artifact.
-    """
-
-    def __init__(self, api_key: str, model: str | None = None) -> None:
-        if not api_key:
-            raise LearnerLanguageError(f"{LEARNER_GEMINI_API_KEY_ENV} is required")
-        self.api_key = api_key
-        primary_model = model or os.environ.get(LEARNER_GEMINI_MODEL_ENV, LEARNER_GEMINI_DEFAULT_MODEL)
-        configured_fallbacks = os.environ.get(LEARNER_GEMINI_FALLBACK_MODELS_ENV, "")
-        self.models = [primary_model]
-        for fallback_model in configured_fallbacks.split(","):
-            fallback_model = fallback_model.strip()
-            if fallback_model and fallback_model not in self.models:
-                self.models.append(fallback_model)
-        self.model_index = 0
-        self.model = self.models[self.model_index]
-        self.deadline = time.monotonic() + 15 * 60
-        self.total_requests = 0
-        self.cache = load_learner_language_cache()
-        self.changed = False
-        self.request_timestamps: list[float] = []
-
-    def save(self) -> None:
-        if not self.changed:
-            return
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        LEARNER_CACHE_FILE.write_text(
-            json.dumps(self.cache, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        self.changed = False
-
-    def wait_for_request_slot(self) -> None:
-        """Keep model calls safely below the upstream rolling request limit."""
-        while True:
-            now = time.monotonic()
-            if now >= self.deadline or self.total_requests >= 120:
-                raise LearnerLanguageError("Learner generation budget exhausted (15 minutes / 120 requests)")
-            cutoff = now - LEARNER_REQUEST_WINDOW_SECONDS
-            self.request_timestamps = [
-                timestamp for timestamp in self.request_timestamps if timestamp > cutoff
-            ]
-            if len(self.request_timestamps) < LEARNER_REQUESTS_PER_WINDOW:
-                self.request_timestamps.append(now)
-                self.total_requests += 1
-                return
-            delay = (
-                self.request_timestamps[0]
-                + LEARNER_REQUEST_WINDOW_SECONDS
-                - now
-                + LEARNER_RETRY_SAFETY_SECONDS
-            )
-            logging.warning(
-                "Gemini request window is full; waiting %.1fs before the next learner batch",
-                delay,
-            )
-            time.sleep(max(1.0, delay))
-
-    def request_json(self, name: str, schema: dict, instructions: str, payload: dict) -> dict:
-        try:
-            while True:
-                try:
-                    return self._request_json(name, schema, instructions, payload)
-                except LearnerTransientError:
-                    if self.model_index + 1 >= len(self.models):
-                        raise
-                    previous_model = self.model
-                    self.model_index += 1
-                    self.model = self.models[self.model_index]
-                    logging.warning("Gemini fallback: %s -> %s for %s", previous_model, self.model, name)
-        finally:
-            chain = " -> ".join(self.models)
-            logging.info("Learner model: %s; model chain: %s; requests: %d",
-                         self.model, chain, self.total_requests)
-            summary = os.environ.get("GITHUB_STEP_SUMMARY")
-            if summary:
-                with open(summary, "a", encoding="utf-8") as output:
-                    output.write(
-                        f"\nLearner request {name}: final_model `{self.model}`, "
-                        f"model_chain `{chain}`, requests={self.total_requests}\n"
-                    )
-
-    def _request_json(self, name: str, schema: dict, instructions: str, payload: dict) -> dict:
-        request_body = {
-            "systemInstruction": {"parts": [{"text": instructions}]},
-            "contents": [{"parts": [{"text": json.dumps(payload, ensure_ascii=False)}]}],
-            "generationConfig": {
-                "responseMimeType": "application/json",
-                "responseJsonSchema": schema,
-            },
-        }
-        for attempt in range(LEARNER_MAX_RETRIES):
-            self.wait_for_request_slot()
-            try:
-                response = requests.post(
-                    GEMINI_GENERATE_CONTENT_URL.format(model=self.model),
-                    headers={
-                        "Content-Type": "application/json",
-                        "x-goog-api-key": self.api_key,
-                    },
-                    json=request_body,
-                    timeout=max(1, min(TIMEOUT_SECONDS * 3, self.deadline - time.monotonic())),
-                )
-            except (requests.ConnectionError, requests.Timeout) as error:
-                if attempt + 1 == LEARNER_MAX_RETRIES:
-                    raise LearnerTransientError(f"Gemini {name} request failed: {error}") from error
-                delay = min(2**attempt, LEARNER_MAX_RETRY_SECONDS)
-                logging.warning("Gemini %s request failed; retrying in %ss", name, delay)
-                time.sleep(delay)
-                continue
-            except requests.RequestException as error:
-                raise LearnerLanguageError(f"Gemini {name} request failed: {error}") from error
-            status_code = getattr(response, "status_code", None)
-            if status_code == 429:
-                retrying = attempt + 1 < LEARNER_MAX_RETRIES
-                server_retry_after = gemini_server_retry_seconds(response)
-                delay = (
-                    max(
-                        1.0,
-                        min(
-                            server_retry_after + LEARNER_RETRY_SAFETY_SECONDS,
-                            LEARNER_MAX_RETRY_SECONDS,
-                        ),
-                    )
-                    if server_retry_after is not None else 10.0
-                )
-                quota = gemini_quota_diagnostics(response)
-                logging.warning(
-                    "Gemini rate-limited %s model=%s attempt=%d/%d action=%s quota=%s "
-                    "server_retry_after=%s wait=%.1fs",
-                    name,
-                    self.model,
-                    attempt + 1,
-                    LEARNER_MAX_RETRIES,
-                    "retrying" if retrying else "retry budget exhausted",
-                    json.dumps(quota, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
-                    if quota else "unavailable",
-                    f"{server_retry_after:.1f}s" if server_retry_after is not None else "unavailable",
-                    delay if retrying else 0.0,
-                )
-                if retrying:
-                    time.sleep(delay)
-                    continue
-            if status_code in {500, 502, 503, 504} and attempt + 1 < LEARNER_MAX_RETRIES:
-                delay = gemini_retry_seconds(response)
-                delay = max(delay, min(10 * (2**attempt), LEARNER_MAX_RETRY_SECONDS))
-                logging.warning(
-                    "Gemini temporarily unavailable (%s) %s; retrying in %.1fs (%d/%d)",
-                    status_code,
-                    name,
-                    delay,
-                    attempt + 1,
-                    LEARNER_MAX_RETRIES,
-                )
-                time.sleep(delay)
-                continue
-            try:
-                response.raise_for_status()
-            except requests.HTTPError as error:
-                if status_code == 429:
-                    raise LearnerLanguageError(
-                        f"Gemini {name} request failed (429; rate limit); see structured quota log"
-                    ) from error
-                detail = re.sub(r"\s+", " ", response.text).strip()[:600]
-                error_type = LearnerTransientError if status_code in {500, 502, 503, 504} else LearnerLanguageError
-                raise error_type(
-                    f"Gemini {name} request failed ({response.status_code}): {detail or error}"
-                ) from error
-            try:
-                return json.loads(gemini_response_text(response.json()))
-            except (ValueError, json.JSONDecodeError) as error:
-                raise LearnerLanguageError(f"Invalid Gemini {name} response: {error}") from error
-        raise LearnerLanguageError(f"Gemini {name} request exhausted retries")
-
-    def pronunciations(self, texts: list[str]) -> dict[str, str]:
-        unique = list(dict.fromkeys(text for text in texts if text.strip()))
-        result: dict[str, str] = {}
-        missing: list[str] = []
-        for text in unique:
-            cached = self.cache["pronunciations"].get(learner_cache_key(text))
-            if isinstance(cached, str) and cached.strip():
-                try:
-                    result[text] = validate_casual_british_ipa(text, cached)
-                    continue
-                except LearnerLanguageError:
-                    logging.warning("Ignoring invalid cached IPA for %r", text)
-            missing.append(text)
-
-        schema = {
-            "type": "object",
-            "required": ["items"],
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "required": ["id", "guide"],
-                        "properties": {
-                            "id": {"type": "string"},
-                            "guide": {"type": "string"},
-                        },
-                    },
-                }
-            },
-        }
-        for offset in range(0, len(missing), LEARNER_GUIDANCE_BATCH_SIZE):
-            batch = missing[offset : offset + LEARNER_GUIDANCE_BATCH_SIZE]
-            pending = [{"id": str(index), "text": text} for index, text in enumerate(batch)]
-            for semantic_attempt in range(LEARNER_MAX_RETRIES):
-                payload = self.request_json(
-                    "casual_british_ipa", schema, LEARNER_IPA_INSTRUCTIONS, {"items": pending}
-                )
-                guides = payload.get("items")
-                by_id = (
-                    {
-                        item.get("id"): item.get("guide")
-                        for item in guides
-                        if isinstance(item, dict)
-                    }
-                    if isinstance(guides, list)
-                    else {}
-                )
-                unresolved: list[dict[str, str]] = []
-                for item in pending:
-                    guide = by_id.get(item["id"])
-                    if not isinstance(guide, str):
-                        reason = "missing ID" if item["id"] not in by_id else "guide must be a string"
-                        logging.warning("IPA item rejected: id=%s source=%r reason=%s", item["id"], item["text"][:120], reason)
-                        unresolved.append({**item, "repair_reason": reason})
-                        continue
-                    try:
-                        validated = validate_casual_british_ipa(item["text"], guide)
-                    except LearnerLanguageError as error:
-                        logging.warning("IPA item rejected: id=%s source=%r guide=%r reason=%s",
-                                        item["id"], item["text"][:120], guide[:120], error)
-                        unresolved.append({**item, "repair_reason": str(error)})
-                        continue
-                    result[item["text"]] = validated
-                    self.cache["pronunciations"][learner_cache_key(item["text"])] = validated
-                    self.changed = True
-                # Preserve every valid item before repairing only the incomplete
-                # subset. A later model omission must not discard useful work.
-                self.save()
-                pending = unresolved
-                if not pending:
-                    break
-                if semantic_attempt + 1 == LEARNER_MAX_RETRIES:
-                    raise LearnerLanguageError(
-                        "Casual British IPA response remained incomplete for "
-                        + ", ".join(repr(item["text"]) for item in pending)
-                    )
-                delay = min(2**semantic_attempt, LEARNER_MAX_RETRY_SECONDS)
-                logging.warning(
-                    "Gemini omitted or invalidated %d IPA item(s); retrying only those items in %ss (%d/%d)",
-                    len(pending),
-                    delay,
-                    semantic_attempt + 1,
-                    LEARNER_MAX_RETRIES,
-                )
-                time.sleep(delay)
-        return result
-
-    def glossary(self, prayer_title: str, source_text: str) -> list[dict[str, str]]:
-        return self.glossaries([("single", prayer_title, source_text)])["single"]
-
-    def glossaries(self, prayers: list[tuple[str, str, str]]) -> dict[str, list[dict[str, str]]]:
-        result: dict[str, list[dict[str, str]]] = {}
-        missing: list[tuple[str, str, str, str]] = []
-        for prayer_id, prayer_title, source_text in prayers:
-            cache_key = learner_cache_key(f"{prayer_title}\n{source_text}")
-            cached = self.cache["glossaries"].get(cache_key)
-            if isinstance(cached, list) and all(isinstance(item, dict) for item in cached):
-                result[prayer_id] = cached
-            else:
-                missing.append((prayer_id, prayer_title, source_text, cache_key))
-        if not missing:
-            return result
-        schema = {
-            "type": "object",
-            "required": ["items"],
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "required": ["id", "terms"],
-                        "properties": {
-                            "id": {"type": "string"},
-                            "terms": {
-                                "type": "array",
-                                "minItems": 6,
-                                "maxItems": 12,
-                                "items": {
-                                    "type": "object",
-                                    "required": ["term", "definition"],
-                                    "properties": {
-                                        "term": {"type": "string"},
-                                        "definition": {"type": "string"},
-                                    },
-                                },
-                            },
-                        },
-                    },
-                }
-            },
-        }
-        instructions = (
-            "For each supplied prayer, select 6 to 12 English words or short phrases that could "
-            "confuse a learner of English after about six months of study. Return exactly one "
-            "item for each supplied id. Copy every selected term exactly from its own prayer. "
-            "For each, write one very simple English definition, maximum 12 words. Do not "
-            "translate, use markdown, or add terms that do not appear in that prayer."
-        )
-        for offset in range(0, len(missing), LEARNER_GLOSSARY_BATCH_SIZE):
-            pending = missing[offset : offset + LEARNER_GLOSSARY_BATCH_SIZE]
-            for semantic_attempt in range(LEARNER_MAX_RETRIES):
-                payload = self.request_json(
-                    "beginner_prayer_glossaries",
-                    schema,
-                    instructions,
-                    {
-                        "items": [
-                            {"id": prayer_id, "prayer_title": title, "prayer_text": text}
-                            for prayer_id, title, text, _ in pending
-                        ]
-                    },
-                )
-                groups = payload.get("items")
-                by_id = (
-                    {
-                        group.get("id"): group.get("terms")
-                        for group in groups
-                        if isinstance(group, dict)
-                    }
-                    if isinstance(groups, list)
-                    else {}
-                )
-                unresolved: list[tuple[str, str, str, str]] = []
-                for prayer_id, title, source_text, cache_key in pending:
-                    terms = by_id.get(prayer_id)
-                    if not isinstance(terms, list):
-                        unresolved.append((prayer_id, title, source_text, cache_key))
-                        continue
-                    try:
-                        validated = self.validate_glossary_terms(terms, source_text)
-                    except LearnerLanguageError:
-                        unresolved.append((prayer_id, title, source_text, cache_key))
-                        continue
-                    result[prayer_id] = validated
-                    self.cache["glossaries"][cache_key] = validated
-                    self.changed = True
-                # A partial structured response is repairable. Save valid groups
-                # now, then ask Gemini only for the missing or invalid IDs.
-                self.save()
-                pending = unresolved
-                if not pending:
-                    break
-                if semantic_attempt + 1 == LEARNER_MAX_RETRIES:
-                    raise LearnerLanguageError(
-                        "Glossary response remained incomplete for "
-                        + ", ".join(prayer_id for prayer_id, _, _, _ in pending)
-                    )
-                delay = min(2**semantic_attempt, LEARNER_MAX_RETRY_SECONDS)
-                logging.warning(
-                    "Gemini omitted or invalidated %d glossary item(s); retrying only those items in %ss (%d/%d)",
-                    len(pending),
-                    delay,
-                    semantic_attempt + 1,
-                    LEARNER_MAX_RETRIES,
-                )
-                time.sleep(delay)
-        return result
-
-    @staticmethod
-    def validate_glossary_terms(items: list, source_text: str) -> list[dict[str, str]]:
-        validated: list[dict[str, str]] = []
-        source_key = re.sub(r"\s+", " ", source_text).casefold()
-        seen: set[str] = set()
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            term = item.get("term")
-            definition = item.get("definition")
-            if not isinstance(term, str) or not isinstance(definition, str):
-                continue
-            term = re.sub(r"\s+", " ", term).strip()
-            definition = re.sub(r"\s+", " ", definition).strip()
-            term_key = term.casefold()
-            if (
-                not term
-                or not definition
-                or len(definition.split()) > 12
-                or term_key in seen
-                or term_key not in source_key
-            ):
-                continue
-            seen.add(term_key)
-            validated.append({"term": term, "definition": definition})
-        if len(validated) < 6:
-            raise LearnerLanguageError("Glossary response did not provide six valid source terms")
-        return validated
 
 
 def set_inner_html(tag: Tag, fragment: str | None) -> None:
@@ -3643,10 +3069,9 @@ def learner_left_html(text: str) -> str:
     return escaped
 
 
-def learner_row_html(english_text: str, pronunciation: str, *, glossary: bool = False) -> str:
-    classes = "learner-row learner-glossary-row" if glossary else "learner-row"
+def learner_row_html(english_text: str, pronunciation: str) -> str:
     return (
-        f'<section class="{classes}">'
+        '<section class="learner-row">'
         f'<div class="learner-english"><p>{learner_left_html(english_text)}</p></div>'
         f'<div class="learner-pronunciation" lang="en-GB"><p>{html.escape(pronunciation)}</p></div>'
         "</section>"
@@ -3675,35 +3100,12 @@ def learner_source_units(body_html: str) -> list[tuple[str, str]]:
 
 
 def learner_prayer_body(
-    prayer: Prayer,
-    language: LearnerLanguage,
-    *,
-    units: list[tuple[str, str]] | None = None,
-    pronunciations: dict[str, str] | None = None,
-    glossary: list[dict[str, str]] | None = None,
-    glossary_guides: dict[str, str] | None = None,
+    units: list[tuple[str, str]], pronunciations: dict[str, str]
 ) -> str:
-    units = units if units is not None else learner_source_units(prayer.body_html)
-    sentences = [value for kind, value in units if kind == "sentence"]
-    pronunciations = pronunciations if pronunciations is not None else language.pronunciations(sentences)
-    rendered: list[str] = []
-    for kind, value in units:
-        if kind == "heading":
-            rendered.append(value)
-        else:
-            rendered.append(learner_row_html(value, pronunciations[value]))
-
-    source_text = " ".join(sentences)
-    glossary = glossary if glossary is not None else language.glossary(prayer.title, source_text)
-    glossary_left = [f"{item['term']} — {item['definition']}" for item in glossary]
-    glossary_guides = glossary_guides if glossary_guides is not None else language.pronunciations(glossary_left)
-    rendered.append('<section class="learner-glossary"><h2>Words in this prayer</h2>')
-    rendered.extend(
-        learner_row_html(left, glossary_guides[left], glossary=True)
-        for left in glossary_left
+    return "\n".join(
+        value if kind == "heading" else learner_row_html(value, pronunciations[value])
+        for kind, value in units
     )
-    rendered.append("</section>")
-    return "\n".join(rendered)
 
 
 def learner_html_blocks(fragment: str) -> list[str]:
@@ -3711,9 +3113,7 @@ def learner_html_blocks(fragment: str) -> list[str]:
     wrapper = soup.find("div")
     if not wrapper:
         return []
-    # Be tolerant of neutral transport wrappers.  Cached/decrypted content
-    # used to acquire one of these and the paginator silently counted that
-    # wrapper as a single, page-sized block.
+    # Unwrap neutral containers so rows remain indivisible pagination blocks.
     while True:
         children = [child for child in wrapper.children if isinstance(child, Tag)]
         if (
@@ -3729,11 +3129,6 @@ def learner_html_blocks(fragment: str) -> list[str]:
         if isinstance(child, NavigableString):
             continue
         if not isinstance(child, Tag):
-            continue
-        if "learner-glossary" in set(child.get("class", [])):
-            for glossary_child in child.children:
-                if isinstance(glossary_child, Tag):
-                    blocks.append(str(glossary_child))
             continue
         blocks.append(str(child))
     return blocks
@@ -3822,7 +3217,7 @@ def paginate_learner_html(fragment: str) -> list[str]:
         units = learner_block_units(block)
         target = LEARNER_FIRST_PAGE_TARGET_UNITS if not pages else LEARNER_PAGE_TARGET_UNITS
         if units > target:
-            raise LearnerLanguageError("A learner row exceeds the Kindle page budget")
+            raise LearnerBuildError("A learner row exceeds the Kindle page budget")
         if current and is_heading_block(block) and position + 1 < len(blocks):
             # Keep a heading with at least its first following line.  Unlike
             # the Vietnamese single-column paginator, the learner rows are
@@ -4218,7 +3613,7 @@ def learner_index_inner(
 {liturgical_day_html(site.liturgical_day)}
 {english_date_nav_html(site.date, available_dates, from_dir)}
 <section class="home-list"><ul>{items}</ul></section>
-<p class="kindle-note">Casual British IPA for connected speech: weak forms, linking and light sound deletion · Source: iBreviary.</p>
+<p class="kindle-note">British RP IPA generated locally with eSpeak NG · Source: iBreviary.</p>
 <p class="mode-switch"><a href="{reading_href}">Reading mode</a></p>
 """)
 
@@ -4245,7 +3640,7 @@ def learner_responsive_index_inner(
 {liturgical_day_html(site.liturgical_day)}
 {english_date_nav_html(site.date, available_dates, from_dir)}
 <section class="home-list"><ul>{items}</ul></section>
-<p class="kindle-note">Complete unpaginated hours with casual British IPA · Source: iBreviary.</p>
+<p class="kindle-note">Complete unpaginated hours with British RP IPA generated locally with eSpeak NG · Source: iBreviary.</p>
 <p class="mode-switch"><a href="{kindle_href}">Learner · Kindle</a> <a href="{reading_href}">Reading mode</a></p>
 """)
 
@@ -4528,153 +3923,10 @@ def encrypt_english_pages(pages: list[dict[str, str]], passcode: str) -> dict[st
     return {page_id: json.loads(payload) for page_id, payload in encoded.items()}
 
 
-def encrypted_shell_ciphertext(path: Path) -> str:
-    """Read the already encrypted payload from one learner shell.
-
-    The shell stores an encoded SJCL JSON string in ``var CIPHERTEXT``.  This
-    parser deliberately reads only that assignment rather than evaluating any
-    HTML or JavaScript from the downloaded Pages artifact.
-    """
-    source = path.read_text(encoding="utf-8")
-    marker = "var CIPHERTEXT = "
-    start = source.find(marker)
-    if start < 0:
-        raise LearnerLanguageError(f"Encrypted learner payload is missing in {path}")
-    encoded = source[start + len(marker):].lstrip()
-    try:
-        payload, _ = json.JSONDecoder().raw_decode(encoded)
-    except json.JSONDecodeError as error:
-        raise LearnerLanguageError(f"Encrypted learner payload is invalid in {path}") from error
-    if not isinstance(payload, str):
-        raise LearnerLanguageError(f"Encrypted learner payload has an unexpected format in {path}")
-    return payload
-
-
-def learner_edition_profile_matches(learner_root: Path) -> bool:
-    """Tell current source/hour/IPA output from an older encrypted edition."""
-    index_path = learner_root / "index.html"
-    try:
-        shell = index_path.read_text(encoding="utf-8")
-    except OSError:
-        return False
-    return bool(
-        re.search(rf'class="[^"]*\b{re.escape(LEARNER_PROFILE_CLASS)}\b[^"]*"', shell)
-        and re.search(
-            rf'class="[^"]*\b{re.escape(ENGLISH_SOURCE_PROFILE_CLASS)}\b[^"]*"', shell
-        )
-    )
-
-
-def learner_edition_covers_date(learner_root: Path, date: datetime) -> bool:
-    """Avoid relabelling yesterday's cached learner pages as today's Office."""
-    return (learner_root / date_dir_name(date) / "index.html").is_file()
-
-
-def decrypt_english_pages(pages: list[dict[str, str]], passcode: str) -> dict[str, str]:
-    """Decrypt learner fragments in memory for an immediate local re-page."""
-    environment = os.environ.copy()
-    environment[ENGLISH_BREVIARY_PASSCODE_ENV] = passcode
-    result = subprocess.run(
-        ["node", str(DECRYPT_HELPER)],
-        input=json.dumps({"pages": pages}),
-        text=True,
-        capture_output=True,
-        check=True,
-        env=environment,
-        cwd=ROOT,
-    )
-    decoded = json.loads(result.stdout)
-    if not all(isinstance(value, str) for value in decoded.values()):
-        raise LearnerLanguageError("Decrypted learner payload has an unexpected format")
-    return decoded
-
-
-def learner_page_files(learner_root: Path, slug: str) -> list[Path]:
-    """Return current-day encrypted learner pages for one Office in order."""
-    pattern = re.compile(rf"^{re.escape(slug)}(?:-(\d+))?\.html$")
-    indexed: list[tuple[int, Path]] = []
-    for path in learner_root.glob(f"{slug}*.html"):
-        match = pattern.fullmatch(path.name)
-        if match:
-            indexed.append((int(match.group(1) or 1), path))
-    indexed.sort(key=lambda item: item[0])
-    if not indexed or [number for number, _ in indexed] != list(range(1, len(indexed) + 1)):
-        raise LearnerLanguageError(f"Cached learner pages are incomplete for {slug}")
-    return [path for _, path in indexed]
-
-
-def learner_body_from_decrypted_pages(plaintext_pages: list[str]) -> str:
-    """Reassemble paired learner blocks without headers or bottom navigation."""
-    blocks: list[str] = []
-    glossary_open = False
-    for plaintext in plaintext_pages:
-        wrapper = fragment_soup(plaintext).find("div")
-        if wrapper is None:
-            continue
-        # Select only canonical learner content, but at any depth.  This also
-        # repairs the already deployed one-page cache where every row sits
-        # inside an accidental neutral div.
-        for child in wrapper.select("h2, h3, .learner-row"):
-            classes = set(child.get("class", []))
-            is_row = "learner-row" in classes
-            is_heading = child.name in {"h2", "h3"}
-            if is_heading and normalize_key(child.get_text(" ", strip=True)) == "words in this prayer":
-                if not glossary_open:
-                    blocks.append('<section class="learner-glossary">')
-                    glossary_open = True
-            blocks.append(str(child))
-    if glossary_open:
-        blocks.append("</section>")
-    if not blocks:
-        raise LearnerLanguageError("Cached learner edition did not contain paired reading rows")
-    # Keep the same top-level shape produced by ``learner_prayer_body``.
-    # ``paginate_learner_html`` treats every direct child as one indivisible
-    # Kindle block; an extra wrapper would therefore collapse the entire
-    # Office into a single page.
-    return "\n".join(blocks)
-
-
-def restore_english_learner_bodies(
-    learner_root: Path, passcode: str, date: datetime
-) -> dict[str, dict[str, str]]:
-    """Reuse the cached language work while applying the current paginator.
-
-    The cached edition contains Gemini's pronunciation and glossary results.
-    We decrypt its current-day pages only inside the build process, join their
-    paired rows back into each Office, and let ``write_english_learner`` encrypt
-    them again after pagination.  No plaintext is written to disk.
-    """
-    index_path = learner_root / "index.html"
-    if not index_path.is_file():
-        raise LearnerLanguageError("Cached learner unlock page is missing")
-    # The first unlock page derives the session key; every later page in this
-    # edition is encrypted with that key so Kindle can open it without asking
-    # for the passcode again.
-    page_sources: list[dict[str, str]] = [
-        {"id": "learner-root-index", "ciphertext": encrypted_shell_ciphertext(index_path)}
-    ]
-    prayer_pages: dict[str, list[str]] = {}
-    for _, slug in ENGLISH_PRAYERS:
-        page_ids: list[str] = []
-        for page_index, path in enumerate(learner_page_files(learner_root, slug), start=1):
-            page_id = f"{slug}-{page_index}"
-            page_sources.append({"id": page_id, "ciphertext": encrypted_shell_ciphertext(path)})
-            page_ids.append(page_id)
-        prayer_pages[slug] = page_ids
-    decrypted = decrypt_english_pages(page_sources, passcode)
-    restored = {
-        slug: learner_body_from_decrypted_pages([decrypted[page_id] for page_id in page_ids])
-        for slug, page_ids in prayer_pages.items()
-    }
-    logging.info("Repaginated cached English learner content without calling Gemini")
-    return {date_dir_name(date): restored}
-
-
 def write_english_breviary(
     day_sites: list[EnglishDaySite],
     passcode: str,
     *,
-    preserve_learner: bool = False,
     include_learner_link: bool = False,
     target_root: Path | None = None,
 ) -> None:
@@ -4814,77 +4066,26 @@ def write_english_breviary(
             ),
             encoding="utf-8",
         )
-    learner_holds: list[tuple[str, Path]] = []
-    for directory_name in ("learner", "learner-responsive"):
-        hold = target_root.with_name(f"{target_root.name}.{directory_name}-hold")
-        if hold.exists():
-            shutil.rmtree(hold)
-        if preserve_learner and (target_root / directory_name).exists():
-            (target_root / directory_name).rename(hold)
-            learner_holds.append((directory_name, hold))
     if target_root.exists():
         shutil.rmtree(target_root)
     temporary.rename(target_root)
-    for directory_name, hold in learner_holds:
-        hold.rename(target_root / directory_name)
-        refresh_preserved_learner_stylesheet(target_root / directory_name)
     logging.info("Generated %d encrypted English Breviary pages", len(outputs))
 
 
-def refresh_preserved_learner_stylesheet(learner_root: Path) -> None:
-    """Point preserved encrypted learner shells at the current local CSS.
-
-    The learner HTML is cached between workflow runs so ordinary CSS-only
-    deploys do not call Gemini.  Its outer shell is safe to update: the prayer
-    text remains encrypted and untouched.
-    """
-    for page in learner_root.rglob("*.html"):
-        original = page.read_text(encoding="utf-8")
-        updated = re.sub(
-            r"breviary\.css\?v=\d+(-encrypted-learner(?:-responsive)?)",
-            rf"breviary.css?v={BREVIARY_CSS_VERSION}\1",
-            original,
-        )
-        if updated != original:
-            page.write_text(updated, encoding="utf-8")
-
-
 def prepare_english_learner_bodies(
-    day_sites: list[EnglishDaySite], language: LearnerLanguage
+    day_sites: list[EnglishDaySite],
 ) -> dict[str, dict[str, str]]:
-    prepared: list[tuple[str, str, Prayer, list[tuple[str, str]], str]] = []
-    for site in day_sites:
-        date_name = date_dir_name(site.date)
-        for prayer in site.prayers:
-            units = learner_source_units(prayer.body_html)
-            source_text = " ".join(value for kind, value in units if kind == "sentence")
-            prepared.append((date_name, prayer.slug, prayer, units, source_text))
-
-    source_pronunciations = language.pronunciations(
-        [value for _, _, _, units, _ in prepared for kind, value in units if kind == "sentence"]
-    )
-    glossary_by_prayer = language.glossaries(
-        [(f"{date_name}/{slug}", prayer.title, source_text) for date_name, slug, prayer, _, source_text in prepared]
-    )
-    glossary_lines = [
-        f"{item['term']} — {item['definition']}"
-        for date_name, slug, _, _, _ in prepared
-        for item in glossary_by_prayer[f"{date_name}/{slug}"]
+    prepared = [
+        (date_dir_name(site.date), prayer.slug, learner_source_units(prayer.body_html))
+        for site in day_sites
+        for prayer in site.prayers
     ]
-    glossary_pronunciations = language.pronunciations(glossary_lines)
-
+    pronunciations = espeak_pronunciations(
+        value for _, _, units in prepared for kind, value in units if kind == "sentence"
+    )
     learner_bodies: dict[str, dict[str, str]] = {}
-    for date_name, slug, prayer, units, _ in prepared:
-        glossary = glossary_by_prayer[f"{date_name}/{slug}"]
-        learner_bodies.setdefault(date_name, {})[slug] = learner_prayer_body(
-            prayer,
-            language,
-            units=units,
-            pronunciations=source_pronunciations,
-            glossary=glossary,
-            glossary_guides=glossary_pronunciations,
-        )
-    language.save()
+    for date_name, slug, units in prepared:
+        learner_bodies.setdefault(date_name, {})[slug] = learner_prayer_body(units, pronunciations)
     return learner_bodies
 
 
@@ -5101,13 +4302,13 @@ def write_english_learner_responsive(
         ordered = [prayer_by_slug[slug] for _, slug in ENGLISH_PRAYERS]
         bodies = learner_bodies.get(date_name)
         if bodies is None:
-            raise LearnerLanguageError(f"Responsive learner body is missing for {date_name}")
+            raise LearnerBuildError(f"Responsive learner body is missing for {date_name}")
         for prayer_index, prayer in enumerate(ordered):
             previous_prayer = ordered[prayer_index - 1] if prayer_index > 0 else None
             next_prayer = ordered[prayer_index + 1] if prayer_index + 1 < len(ordered) else None
             body_html = bodies.get(prayer.slug)
             if not body_html:
-                raise LearnerLanguageError(
+                raise LearnerBuildError(
                     f"Responsive learner body is missing for {date_name}/{prayer.slug}"
                 )
             nav = english_responsive_nav_html(previous_prayer, next_prayer)
@@ -5262,107 +4463,10 @@ def build_english_breviary(run_date: datetime, passcode: str) -> None:
         fetch_english_day(requests.Session(), date)
         for date in (run_date - timedelta(days=1), run_date, run_date + timedelta(days=1))
     ]
-    learner_api_key = os.environ.get(LEARNER_GEMINI_API_KEY_ENV, "")
-    learner_root = SITE_DIR / "breviary" / "en" / "learner"
-    existing_learner = learner_root.is_dir()
-    learner_profile_current = existing_learner and learner_edition_profile_matches(learner_root)
-    profile_refresh_required = existing_learner and not learner_profile_current
-    refresh_mode = os.environ.get(LEARNER_REFRESH_ENV, "").strip()
-    refresh_learner = (
-        refresh_mode == "1" or profile_refresh_required
-        or (refresh_mode == "missing" and not learner_edition_covers_date(learner_root, run_date))
-    )
-    action = "fallback"
-    reason = "No current learner generated; refresh disabled or API key unavailable"
-    learner_bodies: dict[str, dict[str, str]] | None = None
+    # Reading spans three days; learner remains focused on today's Office.
     learner_sites = [sites[1]]
-    if profile_refresh_required:
-        logging.info(
-            "Encrypted learner profile is stale; refreshing %s",
-            LEARNER_PRONUNCIATION_PROFILE,
-        )
-    try:
-        if refresh_learner and learner_api_key:
-            language = LearnerLanguage(learner_api_key)
-            # The learner edition is intentionally today-only. It keeps the
-            # paired Kindle layout focused on the current Office and, with the
-            # Gemini free-tier request budget, avoids generating three complete
-            # days of pronunciation and glossary material on every refresh.
-            learner_bodies = prepare_english_learner_bodies(learner_sites, language)
-            action, reason = "refresh", "Generated today's learner using language cache and missing-item requests"
-        elif (
-            existing_learner
-            and learner_profile_current
-            and learner_edition_covers_date(learner_root, learner_sites[0].date)
-        ):
-            # A same-day presentation-only deploy applies new pagination without
-            # calling Gemini. Never relabel a prior day's encrypted content.
-            learner_bodies = restore_english_learner_bodies(
-                learner_root, passcode, learner_sites[0].date
-            )
-            action, reason = "reuse", "Restored current encrypted learner without Gemini"
-        elif existing_learner and learner_profile_current:
-            logging.warning(
-                "The cached English learner edition does not cover %s; preserving it until the scheduled refresh",
-                date_dir_name(learner_sites[0].date),
-            )
-        elif learner_api_key:
-            language = LearnerLanguage(learner_api_key)
-            learner_bodies = prepare_english_learner_bodies(learner_sites, language)
-            action, reason = "refresh", "Generated missing learner edition"
-        elif existing_learner:
-            logging.warning(
-                "The encrypted learner edition uses an older pronunciation profile; preserving it "
-                "until %s is configured",
-                LEARNER_GEMINI_API_KEY_ENV,
-            )
-        else:
-            logging.warning(
-                "%s is not configured; preserving the last English learner edition",
-                LEARNER_GEMINI_API_KEY_ENV,
-            )
-    except Exception as error:
-        logging.exception(
-            "English learner refresh failed; preserving the last successfully deployed learner edition"
-        )
-        github_actions_warning("English learner refresh degraded", str(error))
-        learner_bodies = None
-        reason = "Learner generation or restoration failed; see the refresh warning above"
-    if profile_refresh_required and learner_bodies is None:
-        report_learner_freshness(run_date, action, reason)
-        raise LearnerLanguageError(
-            "The cached learner edition uses the previous source/hour contract; "
-            "the complete English bundle is being preserved until its five-hour replacement succeeds"
-        )
-    if learner_bodies is not None:
-        write_english_bundle_atomic(sites, learner_sites, passcode, learner_bodies)
-    else:
-        write_english_breviary(
-            sites,
-            passcode,
-            preserve_learner=existing_learner,
-            include_learner_link=existing_learner,
-        )
-    report_learner_freshness(run_date, action, reason)
-
-
-def report_learner_freshness(run_date: datetime, action: str, reason: str) -> None:
-    target = date_dir_name(run_date)
-    lines = ["### English learner freshness", "", f"Requested date: {target}",
-             f"Action: {action}", f"Reason: {reason}"]
-    for name in ("learner", "learner-responsive"):
-        root = SITE_DIR / "breviary" / "en" / name
-        dates = sorted(p.name for p in root.glob("????-??-??") if (p / "index.html").is_file())
-        current = learner_edition_profile_matches(root) and learner_edition_covers_date(root, run_date)
-        line = f"{name}: {'current' if current else 'stale/missing'}; available dates: {', '.join(dates) or 'none'}"
-        lines.append(line)
-        logging.info("%s", line)
-        if not current:
-            github_actions_warning("English learner stale", f"Requested {target}; {line}")
-    summary = os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary:
-        with open(summary, "a", encoding="utf-8") as output:
-            output.write("\n\n".join(lines) + "\n")
+    learner_bodies = prepare_english_learner_bodies(learner_sites)
+    write_english_bundle_atomic(sites, learner_sites, passcode, learner_bodies)
 
 
 def update_english_breviary_optional(run_date: datetime, passcode: str) -> bool:
@@ -5373,7 +4477,6 @@ def update_english_breviary_optional(run_date: datetime, passcode: str) -> bool:
         logging.exception(
             "English Breviary update failed; preserving the last successfully deployed English edition"
         )
-        report_learner_freshness(run_date, "fallback", "English update failed; see warning and build log")
         github_actions_warning("English Breviary refresh degraded", str(error))
         return False
     return True

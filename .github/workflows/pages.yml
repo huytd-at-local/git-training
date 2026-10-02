@@ -8,12 +8,8 @@ on:
   schedule:
     # 00:23 Vietnam time, away from the top-of-hour scheduling surge.
     - cron: "23 17 * * *"
-    # A second refresh recovers a missing learner date if the first
-    # scheduled run is delayed or an upstream service is temporarily down.
+    # One recovery opportunity for transient source or build failures.
     - cron: "17 18 * * *"
-    # 15:23 Vietnam time: recover a missing date after Pacific midnight's
-    # daily-quota reset in both PST and PDT, well apart from the night runs.
-    - cron: "23 8 * * *"
 
 permissions:
   actions: read
@@ -25,7 +21,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,30 +32,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Restore English learner language cache
-        uses: actions/cache@v4
-        with:
-          path: .cache/breviary-learner-language-v3.json
-          key: breviary-learner-v3-${{ github.run_id }}
-          restore-keys: |
-            breviary-learner-v3-
-
-      # The Pages artifact is the preferred whole-English fallback. Keep the
-      # learner cache too so a first run after artifact expiry still preserves
-      # the latest encrypted learner edition.
-      - name: Restore encrypted English learner edition
-        uses: actions/cache@v4
-        with:
-          path: |
-            site/breviary/en/learner
-            site/breviary/en/learner-responsive
-          key: breviary-learner-edition-v3-${{ github.run_id }}
-          restore-keys: |
-            breviary-learner-edition-v3-
-            breviary-learner-edition-v2-
-            breviary-learner-edition-v1-
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends espeak-ng
+          pip install -r requirements.txt
 
       - name: Find the previous successful Pages artifact
         id: previous-pages
@@ -88,7 +64,7 @@ jobs:
                 return;
               }
             }
-            core.warning('No unexpired Pages artifact is available; using the cached or committed English fallback.');
+            core.warning('No unexpired Pages artifact is available; using the committed English fallback.');
 
       - name: Download the last successful Pages artifact
         if: steps.previous-pages.outputs.run-id != ''
@@ -114,11 +90,6 @@ jobs:
         run: python scripts/fetch.py
         env:
           BREVIARY_EN_PASSCODE: ${{ secrets.BREVIARY_EN_PASSCODE }}
-          BREVIARY_LEARNER_GEMINI_API_KEY: ${{ secrets.BREVIARY_LEARNER_GEMINI_API_KEY }}
-          BREVIARY_LEARNER_GEMINI_MODEL: gemini-3.7-flash
-          BREVIARY_LEARNER_FALLBACK_MODELS: gemini-3.6-flash,gemini-3.5-flash
-          # Manual/backup runs fill missing or stale-profile editions; the primary schedule forces refresh.
-          BREVIARY_REFRESH_LEARNER: ${{ (github.event.schedule == '23 17 * * *' && '1') || ((github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && 'missing') || '0' }}
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v4
@@ -139,18 +110,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-
-  learner-freshness:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: github-pages
-          path: freshness-artifact
-      - name: Check published artifact learner date
-        run: |
-          mkdir -p freshness-site
-          tar -xf freshness-artifact/artifact.tar -C freshness-site
-          python3 scripts/check_learner_freshness.py freshness-site

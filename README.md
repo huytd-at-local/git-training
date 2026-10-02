@@ -42,31 +42,18 @@ sinh lại phần tiếng Anh ở local:
 BREVIARY_EN_PASSCODE=123456 .venv/bin/python scripts/fetch.py --english-only
 ```
 
-Chế độ học tiếng Anh nằm tại `/breviary/en/learner/`. Nó chỉ được sinh khi có
-thêm `BREVIARY_LEARNER_GEMINI_API_KEY`; Gemini API chỉ chạy lúc build để tạo phiên âm
-IPA Anh-Anh tự nhiên và giải thích từ đơn giản. Kindle chỉ nhận HTML mã hóa đã tạo sẵn,
-không gọi API hay tải tài nguyên ngoài lúc đọc. GitHub Actions giữ cache ngắn
-hạn của kết quả ngôn ngữ để tránh tạo lại các câu lặp. Model mặc định là
-`gemini-3.7-flash`. Nếu Gemini trả thiếu một mục, build giữ ngay các mục hợp lệ
-và retry riêng phần còn thiếu. Nếu learner hoặc nguồn iBreviary vẫn lỗi,
-workflow giữ bản English đã deploy thành công gần nhất và tiếp tục publish phần
-tiếng Việt; lỗi phụ vẫn xuất hiện dưới dạng warning trong GitHub Actions.
-Lượt dự phòng tự phục hồi learner nếu thiếu ngày hiện tại; nếu đã có thì tái sử dụng
-bản mã hóa, không gọi Gemini. Actions summary báo ngày yêu cầu, ngày có sẵn và
-trạng thái refresh/reuse/fallback riêng cho hai bản learner.
-Client giới hạn tổng cộng 4 request / 60 giây trong mỗi lượt, gồm retry HTTP,
-repair và fallback, để giữ khoảng đệm dưới quota 5 RPM của các model Flash
-production được xác nhận trong AI Studio ngày 02/10/2026. Đây không phải bộ
-đếm RPD: project Free tier hiện có 20 request/ngày/model, dùng chung giữa các
-key và các lượt manual/qualification. Giảm RPM không khắc phục lỗi upstream 503.
-Nếu model chính hết retry do lỗi server/kết nối tạm thời, biến
-`BREVIARY_LEARNER_FALLBACK_MODELS` cho phép chuyển lần lượt sang model dự phòng
-cho phần còn lại của lượt. Actions giữ chuỗi `gemini-3.7-flash` → `gemini-3.6-flash`
-→ `gemini-3.5-flash`, chỉ đi một chiều và không quay lại model đã lỗi;
-không chuyển model khi lỗi xác thực, request sai hoặc quota 429. Ngân sách mỗi
-lượt sinh ngôn ngữ là 15 phút / 120 request, dùng chung cho toàn bộ chuỗi model.
-Job `learner-freshness` kiểm tra artifact độc lập; có thể báo đỏ vì learner cũ
-trong khi job deploy Reading vẫn thành công.
+Chế độ học tiếng Anh có bản phân trang Kindle tại `/breviary/en/learner/`
+và bản responsive không phân trang tại `/breviary/en/learner-responsive/`.
+Hai bản dùng cùng nội dung hôm nay: cột trái giữ nguyên câu tiếng Anh từ nguồn,
+cột phải là IPA British RP sinh local bằng eSpeak NG 1.52.0, voice `en-GB-x-rp`.
+Khi sinh các trang learner tiếng Anh, eSpeak NG 1.52.0 phải có sẵn dưới tên
+`espeak-ng` trên PATH; build kiểm tra phiên bản trước khi sinh IPA. Actions dùng
+Ubuntu 26.04 và cài eSpeak NG từ package Ubuntu. Không cần API hay cache phiên âm;
+Kindle chỉ nhận HTML mã hóa đã tạo sẵn.
+Reading và cả hai bản learner được sinh trong cây staging rồi thay thế cùng nhau.
+Nếu nguồn iBreviary hoặc build lỗi, workflow giữ toàn bộ bản English thành công
+gần nhất từ Pages artifact và tiếp tục publish phần tiếng Việt, với warning
+trong GitHub Actions.
 
 ## Test
 
@@ -118,14 +105,10 @@ Chrome vẫn dùng rendering engine hiện đại nên kết quả cuối cùng 
 5. Vào tab `Actions` chạy workflow `Pages` thủ công lần đầu bằng `workflow_dispatch`, hoặc chờ push tự chạy.
 6. Mở URL GitHub Pages được workflow trả ra.
 
-Workflow chạy hằng ngày lúc 00:23, 01:17 và 15:23 giờ Việt Nam; cron UTC lần lượt
-là `23 17 * * *`, `17 18 * * *` và `23 8 * * *`. GitHub có thể chạy cron trễ.
-Lượt 00:23 buộc refresh learner; hai lượt dự phòng và `Run workflow` thủ công
-dùng `missing`, chỉ sinh lại nếu thiếu ngày hiện tại hoặc profile đã cũ.
-Push lên `main` không buộc sinh learner. Recovery 15:23 nằm sau thời điểm reset
-RPD lúc nửa đêm Pacific cả PST lẫn PDT, tạo thêm cơ hội phục hồi khi hai lượt
-ban đêm gặp 503; không bảo đảm dịch vụ sẽ sẵn sàng hoặc còn đủ quota.
-Mỗi lần tạo site thành công, script chỉ giữ nội dung của hôm qua, hôm nay và ngày mai.
+Workflow chạy hằng ngày lúc 00:23 và 01:17 giờ Việt Nam; cron UTC lần lượt
+là `23 17 * * *` và `17 18 * * *`. GitHub có thể chạy cron trễ. Lượt 01:17 là
+một cơ hội phục hồi nếu nguồn hoặc build tạm thời lỗi. Mỗi build English thành
+công sinh lại learner local cho hôm nay; Reading vẫn gồm hôm qua, hôm nay và ngày mai.
 
 ## Debug lỗi parse
 
