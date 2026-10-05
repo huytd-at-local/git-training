@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo
 
 
 SOURCE_URL = "https://ktcgkpv.org/readings/prayer"
+MASS_READING_URL = "https://ktcgkpv.org/readings/mass-reading"
 IBREVIARY_URL = "https://www.ibreviary.com/m2/"
 IBREVIARY_OPTIONS_URL = urljoin(IBREVIARY_URL, "opzioni.php")
 ENGLISH_BREVIARY_PASSCODE_ENV = "BREVIARY_EN_PASSCODE"
@@ -84,6 +85,9 @@ PRAYERS = [
     ("Kinh Chiều", "kinh-chieu"),
     ("Kinh Tối", "kinh-toi"),
 ]
+
+MASS_READING = ("Bài đọc Thánh lễ", "bai-doc-thanh-le")
+VIETNAMESE_ENTRIES = [*PRAYERS, MASS_READING]
 
 ENGLISH_PRAYER_SOURCES = [
     ("Office of Readings", "office-of-readings", "ufficio_delle_letture"),
@@ -724,6 +728,37 @@ def fetch_prayer_json(
     if not payload.get("success"):
         raise ValueError(f"AJAX prayer request failed: {payload.get('msg')}")
     return payload["data"]
+
+
+def fetch_mass_reading(session: requests.Session, date: datetime) -> Prayer:
+    """Fetch the same default Mass and reading variants as the source page."""
+    logging.info("Fetching Mass readings for %s", date_dir_name(date))
+    try:
+        response = session.post(
+            MASS_READING_URL,
+            data={
+                "day": date.day,
+                "month": date.month,
+                "year": date.year,
+                "seldate": date.strftime("%a %b %d %Y 00:00:00 GMT+0700 (Indochina Time)"),
+            },
+            headers={
+                "User-Agent": USER_AGENT,
+                "Accept": "application/json",
+                "X-Requested-With": "XMLHttpRequest",
+                "Referer": MASS_READING_URL,
+            },
+            timeout=TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict) or not payload.get("success"):
+            raise ValueError("source request was unsuccessful")
+        prayer = render_mass_reading(payload.get("data"))
+    except (requests.RequestException, ValueError) as error:
+        raise ValueError(f"Mass readings for {date_dir_name(date)} failed: {error}") from error
+    logging.info("Selected Mass readings: %s", prayer.liturgical_day.title)
+    return prayer
 
 
 def ibreviary_request(session: requests.Session, url: str) -> str:
@@ -1741,6 +1776,130 @@ def extract_liturgical_day(payloads: list[dict]) -> LiturgicalDay | None:
             if title:
                 return LiturgicalDay(title=title, rank=rank, selector="payload.feasts[0].text")
     return None
+
+
+def normalize_mass_reading_html(fragment: str, season_value: object = None) -> str:
+    """Keep source words and verse numbers, with line breaks the paginator understands."""
+    soup = fragment_soup(fragment)
+    wrapper = soup.find("div")
+    if wrapper is None:
+        raise ValueError("Mass reading content is missing")
+    # Match adjustSeasonContent() on the source before stripping its classes.
+    season = str(season_value or "").upper()
+    for code, name in (("LNT", "lent"), ("CHR", "christmas"), ("ADV", "advent"), ("EAS", "easter"), ("ORD", "ordinary")):
+        hidden = f".not-{name}" if season == code else f".only-{name}"
+        for tag in list(wrapper.select(hidden)):
+            tag.decompose()
+    for tag in list(wrapper.select("img, input, form, nav, noscript")):
+        tag.decompose()
+    for heading in wrapper.select(".division-header"):
+        heading.name = "h2"
+    # Source psalm/poem spans display as separate lines on its site. Preserve
+    # that boundary explicitly without the prayer renderer's hidden numbers.
+    for paragraph in wrapper.find_all("p"):
+        for number in list(paragraph.find_all("sup", recursive=False)):
+            following = number.find_next_sibling()
+            if following is None or following.name != "span":
+                continue
+            previous = number.previous_sibling
+            while isinstance(previous, NavigableString) and not str(previous).strip():
+                previous = previous.previous_sibling
+            if isinstance(previous, Tag) and previous.name == "span":
+                number.insert_before(soup.new_tag("br"))
+            number.insert_after(NavigableString(" "))
+            # 'leading' here describes psalm lines, not a reading introduction.
+            if "leading" in paragraph.get("class", []):
+                paragraph["class"] = [cls for cls in paragraph["class"] if cls != "leading"]
+    for cross in wrapper.select(".holycross"):
+        cross.insert_after(NavigableString(" "))
+    sanitize_render_dom(wrapper)
+    for span in list(wrapper.find_all("span")):
+        if not span.get("class"):
+            span.unwrap()
+    for link in list(wrapper.find_all("a")):
+        link.unwrap()
+    body = html_children(wrapper)
+    if not wrapper.get_text(" ", strip=True):
+        raise ValueError("Mass reading content is empty")
+    return body
+
+
+def render_mass_reading(data: dict | None) -> Prayer:
+    if not isinstance(data, dict):
+        raise ValueError("Mass reading data is missing")
+    masses = data.get("mass_reading")
+    if not isinstance(masses, list) or not masses or not isinstance(masses[0], dict):
+        raise ValueError("Default Mass reading is missing")
+    mass = masses[0]
+    liturgical_day = extract_liturgical_day([mass])
+    if liturgical_day is None:
+        raise ValueError("Mass reading liturgical day is missing")
+
+    season = mass.get("date_info", {}).get("season")
+    if mass.get("is_special"):
+        content = mass.get("special_content")
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("Special Mass reading content is missing")
+        wrapper = fragment_soup(content).find("div")
+        # The source displays only the first direct selectable child of each
+        # division. Other choices are alternatives, not extra readings.
+        for division in wrapper.select(".division"):
+            choices = division.find_all(class_="selectable", recursive=False)
+            for choice in choices[1:]:
+                choice.decompose()
+        body = normalize_mass_reading_html(html_children(wrapper), season)
+    else:
+        def first_part(key: str, *, required: bool = False) -> dict | None:
+            choices = mass.get(key)
+            if choices is None or choices == []:
+                if required:
+                    raise ValueError(f"Mass reading {key} is missing")
+                return None
+            if not isinstance(choices, list) or not isinstance(choices[0], dict):
+                raise ValueError(f"Mass reading {key} has an unexpected format")
+            return choices[0]
+
+        first = first_part("reading1", required=True)
+        gospel = first_part("gospel", required=True)
+        parts: list[str] = []
+
+        def append_part(title: str, fields: dict | None, *, reading: bool = False) -> None:
+            if fields is None:
+                return
+            content = fields.get("CONTENT")
+            if not isinstance(content, str) or not BeautifulSoup(content, "lxml").get_text(strip=True):
+                raise ValueError(f"Mass reading {title} content is missing")
+            parts.append(f"<h2>{html.escape(title)}</h2>")
+            for key, css_class in (("INDEXING", "indexing"), ("TITLE", "title"), ("EPITOMIZE", "note"), ("LEAD", "note")):
+                value = fields.get(key)
+                if value and (reading or key == "INDEXING"):
+                    parts.append(f'<p class="{css_class}">{value}</p>')
+            parts.append(content)
+
+        append_part("Ca nhập lễ", first_part("introit"))
+        append_part("Bài đọc 1", first, reading=True)
+        append_part("Đáp ca", {"INDEXING": first.get("INDEXING_2"), "CONTENT": first.get("CONTENT_2")})
+        append_part("Bài đọc 2", first_part("reading2"), reading=True)
+        if gospel.get("CONTENT_2"):
+            append_part("Tung hô Tin Mừng", {"INDEXING": gospel.get("INDEXING_2"), "CONTENT": gospel["CONTENT_2"]})
+        append_part("Tin Mừng", gospel, reading=True)
+        append_part("Ca hiệp lễ", first_part("communion"))
+        body = normalize_mass_reading_html("\n".join(parts), season)
+    return Prayer(*MASS_READING, body, liturgical_day)
+
+
+def add_mass_readings(session: requests.Session, day_sites: list[DaySite]) -> list[DaySite]:
+    """Prepare all eight entries for every date before writing any site pages."""
+    result: list[DaySite] = []
+    for site in day_sites:
+        mass = fetch_mass_reading(session, site.date)
+        result.append(DaySite(
+            site.date,
+            [*site.prayers, mass],
+            site.liturgical_day,
+            [*site.debug_lines, f"Mass reading source: {MASS_READING_URL}; requested {date_dir_name(site.date)}; selected {mass.liturgical_day.title}"],
+        ))
+    return result
 
 
 class LineCollector:
@@ -3325,11 +3484,11 @@ def write_day_site(
     paginated: dict[str, list[str]] | None = None,
 ) -> None:
     target_dir.mkdir(parents=True, exist_ok=True)
-    for _, slug in PRAYERS:
+    for _, slug in VIETNAMESE_ENTRIES:
         for path in target_dir.glob(f"{slug}*.html"):
             path.unlink()
     index_items = "\n".join(
-        f'<li><a href="{slug}.html">{html.escape(title)}</a></li>' for title, slug in PRAYERS
+        f'<li><a href="{slug}.html">{html.escape(title)}</a></li>' for title, slug in VIETNAMESE_ENTRIES
     )
     index_body = f"""
 {date_nav_html(date, available_dates, from_dir)}
@@ -3355,9 +3514,9 @@ def write_day_site(
     )
 
     prayer_by_slug = {prayer.slug: prayer for prayer in prayers}
-    ordered = [prayer_by_slug[slug] for _, slug in PRAYERS]
+    ordered = [prayer_by_slug[slug] for _, slug in VIETNAMESE_ENTRIES]
     responsive_index_items = "\n".join(
-        f'<li><a href="{responsive_prayer_filename(slug)}">{html.escape(title)}</a></li>' for title, slug in PRAYERS
+        f'<li><a href="{responsive_prayer_filename(slug)}">{html.escape(title)}</a></li>' for title, slug in VIETNAMESE_ENTRIES
     )
     responsive_index_body = f"""
 {date_nav_html(date, available_dates, from_dir, responsive=True)}
@@ -3454,12 +3613,12 @@ def write_breviary_day_site(
 ) -> None:
     """Write the Breviary skin without recalculating any pagination."""
     target_dir.mkdir(parents=True, exist_ok=True)
-    for _, slug in PRAYERS:
+    for _, slug in VIETNAMESE_ENTRIES:
         for path in target_dir.glob(f"{slug}*.html"):
             path.unlink()
 
     index_items = "\n".join(
-        f'<li><a href="{slug}.html">{html.escape(title)}</a></li>' for title, slug in PRAYERS
+        f'<li><a href="{slug}.html">{html.escape(title)}</a></li>' for title, slug in VIETNAMESE_ENTRIES
     )
     original_index_href = f"../../{from_dir}/index.html" if from_dir else "../index.html"
     index_body = f"""
@@ -3487,7 +3646,7 @@ def write_breviary_day_site(
     )
 
     prayer_by_slug = {prayer.slug: prayer for prayer in prayers}
-    ordered = [prayer_by_slug[slug] for _, slug in PRAYERS]
+    ordered = [prayer_by_slug[slug] for _, slug in VIETNAMESE_ENTRIES]
     for index, prayer in enumerate(ordered):
         pages = paginated[prayer.slug]
         page_count = len(pages)
@@ -5111,7 +5270,7 @@ def write_site(day_sites: list[DaySite]) -> None:
     error_page = SITE_DIR / "error.html"
     if error_page.exists():
         error_page.unlink()
-    for _, slug in PRAYERS:
+    for _, slug in VIETNAMESE_ENTRIES:
         for path in SITE_DIR.glob(f"{slug}*.html"):
             path.unlink()
     for site in day_sites:
@@ -5265,7 +5424,7 @@ def write_breviary_snapshot() -> None:
             encoding="utf-8",
         )
 
-        for _, slug in PRAYERS:
+        for _, slug in VIETNAMESE_ENTRIES:
             for source_path in sorted(source_root.glob(f"{slug}*.html")):
                 if source_path.name.endswith("-responsive.html"):
                     continue
@@ -5372,6 +5531,7 @@ def main() -> int:
             if sorted(prayer.slug for prayer in prayers) != sorted(slug for _, slug in PRAYERS):
                 raise ValueError("Parsed prayers do not match expected fixed list")
             day_sites = [DaySite(run_date, prayers, liturgical_day, debug_lines)]
+        day_sites = add_mass_readings(session, day_sites)
         write_site(day_sites)
         passcode = os.environ.get(ENGLISH_BREVIARY_PASSCODE_ENV, "")
         if passcode:

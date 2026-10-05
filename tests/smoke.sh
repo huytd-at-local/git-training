@@ -5,6 +5,7 @@ PYTHON_BIN="${PYTHON:-python3}"
 
 "$PYTHON_BIN" -m compileall scripts
 "$PYTHON_BIN" -m unittest discover -s tests -p 'test_learner_ipa.py'
+"$PYTHON_BIN" -m unittest discover -s tests -p 'test_mass_readings.py'
 test -f .github/workflows/pages.yml
 test -f .github/workflows/retry-pages-deployment.yml
 grep -q '^  build:$' .github/workflows/pages.yml
@@ -627,9 +628,12 @@ if len(current_day_names) != 3:
 for path in Path("site").rglob("*.html"):
     text = path.read_text(encoding="utf-8")
     soup = BeautifulSoup(text, "lxml")
-    if re.search(r"<sup>\d{3,}</sup>", text):
+    # These marker-cleanup rules belong to the seven prayers. Mass readings
+    # preserve source verse markers, including suffixes such as 1a.
+    is_prayer_page = path.name.startswith("kinh-")
+    if is_prayer_page and re.search(r"<sup>\d{3,}</sup>", text):
         raise SystemExit(f"Wide verse number missing class in {path}")
-    if (path.parent == Path("site") or path.parent.name in current_day_names) and re.search(r"<sup>\d+[A-Za-z]+</sup>", text):
+    if is_prayer_page and (path.parent == Path("site") or path.parent.name in current_day_names) and re.search(r"<sup>\d+[A-Za-z]+</sup>", text):
         raise SystemExit(f"Lettered verse marker leaked into {path}")
     if 'class="verse-line"' in text and '</span><br/><span class="verse-line"' in text:
         raise SystemExit(f"Unexpected blank-line br between verse lines in {path}")

@@ -1,0 +1,86 @@
+{
+  "success": true,
+  "msg": null,
+  "data": {
+    "mass_reading": [
+      {
+        "date_info": {
+          "season": "ORD",
+          "daily_title": "Chúa Nhật Tuần XXVIII - Mùa Thường Niên"
+        },
+        "display_text": "Ngày thường",
+        "introit": [
+          {
+            "INDEXING": "Tv 129,3-4",
+            "CONTENT": "<p>Ôi lạy Chúa, nếu như Ngài chấp tội,</p><p>nào có ai đứng vững được chăng ?</p><p>Nhưng Chúa vẫn rộng lòng tha thứ,</p><p>lạy Chúa là Thiên Chúa Ít-ra-en.</p>"
+          }
+        ],
+        "reading1": [
+          {
+            "INDEXING": "Is 25,6-10a",
+            "EPITOMIZE": "Đức Chúa sẽ đãi một bữa tiệc và sẽ lau khô dòng lệ trên khuôn mặt mọi người.",
+            "LEAD": "Bài trích sách ngôn sứ I-sai-a.",
+            "CONTENT": "<p class=\"poem\"><sup>6</sup><span>Ngày ấy, trên núi này,<br />Đức Chúa các đạo binh sẽ đãi muôn dân một bữa tiệc :<br />tiệc thịt béo, tiệc rượu ngon,<br />thịt béo ngậy, rượu ngon tinh chế.</span><br /><sup>7</sup><span>Trên núi này, Người sẽ xé bỏ chiếc khăn che phủ mọi dân,<br />và tấm màn trùm lên muôn nước.</span><br /><sup>8</sup><span>Người sẽ vĩnh viễn tiêu diệt tử thần.<br />Đức Chúa là Chúa Thượng sẽ lau khô dòng lệ<br />trên khuôn mặt mọi người,<br />và trên toàn cõi đất, Người sẽ xoá sạch<br />nỗi ô nhục của dân Người. Đức Chúa phán như vậy.</span><br /><sup>9</sup><span>Ngày ấy, người ta sẽ nói : “Đây là Thiên Chúa chúng ta,<br />chúng ta từng trông đợi Người,<br />và đã được Người thương cứu độ.<br />Chính Người là Đức Chúa chúng ta từng đợi trông.<br />Nào ta cùng hoan hỷ vui mừng bởi được Người cứu độ.”</span><br /><sup>10a</sup><span>Vì bàn tay Đức Chúa sẽ lại đặt trên núi này.<br /></span></p>",
+            "INDEXING_2": "Tv 22,1-3a.3b-4.5.6 (Đ. c.6cd)",
+            "CONTENT_2": "<p class=\"response\"><span class=\"pre\">Đ.</span><span class=\"body\">Này tôi được ở đền Người<br />những ngày tháng, những năm dài triền miên.</span></p><p class=\"leading\"><sup>1</sup><span>Chúa là mục tử chăn dắt tôi, tôi chẳng thiếu thốn gì.</span><sup>2</sup><span>Trong đồng cỏ xanh tươi, Người cho tôi nằm nghỉ.<br />Người đưa tôi tới dòng nước trong lành</span><sup>3a</sup><span>và bổ sức cho tôi.</span></p><p class=\"response\"><span class=\"pre\">Đ.</span><span class=\"body\">Này tôi được ở đền Người<br />những ngày tháng, những năm dài triền miên.</span></p><p class=\"leading\"><sup>3b</sup><span>Người dẫn tôi trên đường ngay nẻo chính<br />vì danh dự của Người.</span><sup>4</sup><span>Lạy Chúa, dầu qua lũng âm u<br />con sợ gì nguy khốn, vì có Chúa ở cùng.<br />Côn trượng Ngài bảo vệ, con vững dạ an tâm.</span></p><p class=\"response\"><span class=\"pre\">Đ.</span><span class=\"body\">Này tôi được ở đền Người<br />những ngày tháng, những năm dài triền miên.</span></p><p class=\"leading\"><sup>5</sup><span>Chúa dọn sẵn cho con bữa tiệc<br />ngay trước mặt quân thù.<br />Đầu con, Chúa xức đượm dầu thơm,<br />ly rượu con đầy tràn chan chứa.</span></p><p class=\"response\"><span class=\"pre\">Đ.</span><span class=\"body\">Này tôi được ở đền Người<br />những ngày tháng, những năm dài triền miên.</span></p><p class=\"leading\"><sup>6</sup><span>Lòng nhân hậu và tình thương Chúa<br />ấp ủ tôi suốt cả cuộc đời,<br />và tôi được ở đền Người<br />những ngày tháng, những năm dài triền miên.</span></p><p class=\"response\"><span class=\"pre\">Đ.</span><span class=\"body\">Này tôi được ở đền Người<br />những ngày tháng, những năm dài triền miên.</span></p>",
+            "OPTIONAL_INDEXING": null,
+            "OPTIONAL_CONTENT": null
+          }
+        ],
+        "reading2": [
+          {
+            "INDEXING": "Pl 4,12-14.19-20",
+            "EPITOMIZE": "Với Đấng ban sức mạnh cho tôi, tôi chịu được hết.",
+            "LEAD": "Bài trích thư của thánh Phao-lô tông đồ gửi tín hữu Phi-líp-phê.",
+            "CONTENT": "<p><sup>12</sup> Thưa anh em, tôi sống thiếu thốn cũng được, mà sống dư dật cũng được. Trong mọi hoàn cảnh, no hay đói, dư dật hay túng bấn, tôi đã tập quen cả. <sup>13</sup> Với Đấng ban sức mạnh cho tôi, tôi chịu được hết. <sup>14</sup> Tuy nhiên, anh em đã chia sẻ với tôi, khi tôi gặp cơn quẫn bách, như thế là phải. <sup>19</sup> Thiên Chúa của tôi sẽ thoả mãn mọi nhu cầu của anh em một cách tuyệt vời, theo sự giàu sang của Người trong Đức Ki-tô Giê-su. <sup>20</sup> Xin tôn vinh Thiên Chúa là Cha chúng ta, đến muôn thuở muôn đời ! A-men.</p>",
+            "INDEXING_2": null,
+            "CONTENT_2": null,
+            "OPTIONAL_INDEXING": null,
+            "OPTIONAL_CONTENT": null
+          }
+        ],
+        "gospel": [
+          {
+            "INDEXING": "Mt 22,1-14",
+            "EPITOMIZE": "Gặp ai, anh em cũng mời hết vào tiệc cưới.",
+            "LEAD": "<span class=\"holycross\">&#x2720;</span>Tin Mừng Chúa Giê-su Ki-tô theo thánh Mát-thêu.",
+            "CONTENT": "<p><sup>1</sup> Khi ấy, Đức Giê-su dùng dụ ngôn mà nói với các thượng tế và kỳ mục trong dân rằng : <sup>2</sup> “Nước Trời cũng giống như chuyện một vua kia mở tiệc cưới cho con mình. <sup>3</sup> Nhà vua sai đầy tớ đi thỉnh các quan khách đã được mời trước, xin họ đến dự tiệc, nhưng họ không chịu đến. <sup>4</sup> Nhà vua lại sai những đầy tớ khác đi, và dặn họ : ‘Hãy thưa với quan khách đã được mời rằng : Này cỗ bàn, ta đã dọn xong, bò tơ và thú béo đã hạ rồi, mọi sự đã sẵn. Mời quý vị đến dự tiệc cưới !’ <sup>5</sup> Nhưng quan khách không thèm đếm xỉa tới, lại bỏ đi : kẻ thì đi thăm nông trại, người thì đi buôn, <sup>6</sup> còn những kẻ khác lại bắt các đầy tớ của vua mà hành hạ và giết chết. <sup>7</sup> Nhà vua liền nổi cơn thịnh nộ, sai quân đi tru diệt bọn sát nhân ấy và thiêu huỷ thành phố của chúng. <sup>8</sup> Rồi nhà vua bảo đầy tớ : ‘Tiệc cưới đã sẵn sàng rồi, mà những kẻ đã được mời lại không xứng đáng. <sup>9</sup> Vậy các ngươi đi ra các ngả đường, gặp ai cũng mời hết vào tiệc cưới.’ <sup>10</sup> Đầy tớ liền đi ra các nẻo đường, gặp ai, bất luận xấu tốt, cũng tập hợp cả lại, nên phòng tiệc cưới đã đầy thực khách.</p><p><sup>11</sup> “Bấy giờ nhà vua tiến vào quan sát khách dự tiệc, thấy ở đó có một người không mặc y phục lễ cưới, <sup>12</sup> mới hỏi người ấy : ‘Này bạn, làm sao bạn vào đây mà lại không có y phục lễ cưới ?’ Người ấy câm miệng không nói được gì. <sup>13</sup> Nhà vua liền bảo những người phục dịch : ‘Trói chân tay nó lại, quăng nó ra chỗ tối tăm bên ngoài, ở đó người ta sẽ phải khóc lóc nghiến răng ! <sup>14</sup> Vì kẻ được gọi thì nhiều, mà người được chọn thì ít’.”</p>",
+            "INDEXING_2": "x. Ep 1,17-18",
+            "CONTENT_2": "<p>Ha-lê-lui-a. Ha-lê-lui-a. Xin Thân Phụ Đức Giê-su Ki-tô, Chúa chúng ta, soi trí mở lòng cho chúng ta thấy rõ, đâu là niềm hy vọng, mà ơn Người kêu gọi đem lại cho chúng ta. Ha-lê-lui-a.</p>",
+            "OPTIONAL_INDEXING": null,
+            "OPTIONAL_CONTENT": null
+          },
+          {
+            "INDEXING": "Mt 22,1-10",
+            "EPITOMIZE": "Gặp ai, anh em cũng mời hết vào tiệc cưới.",
+            "LEAD": "<span class=\"holycross\">&#x2720;</span>Tin Mừng Chúa Giê-su Ki-tô theo thánh Mát-thêu.",
+            "CONTENT": "<p><sup>1</sup> Khi ấy, Đức Giê-su dùng dụ ngôn mà nói với các thượng tế và kỳ mục trong dân rằng : <sup>2</sup> “Nước Trời cũng giống như chuyện một vua kia mở tiệc cưới cho con mình. <sup>3</sup> Nhà vua sai đầy tớ đi thỉnh các quan khách đã được mời trước, xin họ đến dự tiệc, nhưng họ không chịu đến. <sup>4</sup> Nhà vua lại sai những đầy tớ khác đi, và dặn họ : ‘Hãy thưa với quan khách đã được mời rằng : Này cỗ bàn, ta đã dọn xong, bò tơ và thú béo đã hạ rồi, mọi sự đã sẵn. Mời quý vị đến dự tiệc cưới !’ <sup>5</sup> Nhưng quan khách không thèm đếm xỉa tới, lại bỏ đi : kẻ thì đi thăm nông trại, người thì đi buôn, <sup>6</sup> còn những kẻ khác lại bắt các đầy tớ của vua mà hành hạ và giết chết. <sup>7</sup> Nhà vua liền nổi cơn thịnh nộ, sai quân đi tru diệt bọn sát nhân ấy và thiêu huỷ thành phố của chúng. <sup>8</sup> Rồi nhà vua bảo đầy tớ : ‘Tiệc cưới đã sẵn sàng rồi, mà những kẻ đã được mời lại không xứng đáng. <sup>9</sup> Vậy các ngươi đi ra các ngả đường, gặp ai cũng mời hết vào tiệc cưới.’ <sup>10</sup> Đầy tớ liền đi ra các nẻo đường, gặp ai, bất luận xấu tốt, cũng tập hợp cả lại, nên phòng tiệc cưới đã đầy thực khách.”</p>",
+            "INDEXING_2": "x. Ep 1,17-18",
+            "CONTENT_2": "<p>Ha-lê-lui-a. Ha-lê-lui-a. Xin Thân Phụ Đức Giê-su Ki-tô, Chúa chúng ta, soi trí mở lòng cho chúng ta thấy rõ, đâu là niềm hy vọng, mà ơn Người kêu gọi đem lại cho chúng ta. Ha-lê-lui-a.</p>",
+            "OPTIONAL_INDEXING": null,
+            "OPTIONAL_CONTENT": null
+          }
+        ],
+        "communion": [
+          {
+            "INDEXING": "Tv 33,11",
+            "CONTENT": "<p>Kẻ giàu sang phải bần cùng khốn khổ,</p><p>còn ai tìm kiếm Chúa chẳng thiếu của gì.</p>"
+          },
+          {
+            "INDEXING": "1 Ga 3,2",
+            "CONTENT": "<p>Khi Đức Ki-tô xuất hiện,</p><p>chúng ta sẽ nên giống như Người,</p><p>vì Người thế nào,</p><p>chúng ta sẽ được thấy Người như vậy.</p>"
+          }
+        ],
+        "special_content": null,
+        "is_special": false
+      }
+    ],
+    "today": {
+      "date": "04",
+      "month": "10",
+      "year": "2026",
+      "weekday": "SUN"
+    },
+    "limit": true
+  }
+}

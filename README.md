@@ -2,7 +2,8 @@
 
 Static site tối giản để đọc Các Giờ Kinh Phụng Vụ trên Kindle Paperwhite browser cũ.
 
-Nguồn nội dung: <https://ktcgkpv.org/readings/prayer>
+Nguồn nội dung: <https://ktcgkpv.org/readings/prayer> và
+<https://ktcgkpv.org/readings/mass-reading>
 
 ## Chạy local
 
@@ -32,6 +33,21 @@ hoặc thay đổi root:
 ```sh
 python scripts/fetch.py --breviary-only
 ```
+
+Cả ba mode Tiếng Việt (Kindle, Responsive và Monastic Breviary) có 7 giờ kinh
+và mục thứ 8 **Bài đọc Thánh lễ**, đặt sau Kinh Tối. Các mục cùng bao gồm hôm qua,
+hôm nay và ngày mai theo giờ Việt Nam. Bài đọc Thánh lễ giữ các phần nguồn cung cấp:
+Ca nhập lễ, Bài đọc 1, Đáp ca, Bài đọc 2 nếu có, Tung hô Tin Mừng, Tin Mừng và Ca hiệp lễ.
+Build lấy bộ lễ và từng bản bài đọc mặc định khi mở trang nguồn; nếu có nhiều lựa
+chọn, chỉ dùng lựa chọn đầu tiên như nguồn. Bài đọc giữ nguyên văn, trích dẫn và
+số câu, với tên lễ riêng của bộ đọc đã chọn.
+
+Đường dẫn hôm nay là `/bai-doc-thanh-le.html`,
+`/bai-doc-thanh-le-responsive.html` và `/breviary/bai-doc-thanh-le.html`;
+các ngày khác dùng thư mục ngày như những giờ kinh hiện có. Kindle và Breviary
+phân trang cùng nội dung; Responsive hiển thị trọn bài trên một trang.
+Nếu tải hoặc đọc dữ liệu Thánh lễ thất bại, build dừng trước khi ghi các trang mới;
+workflow không deploy và giữ website đã xuất bản.
 
 Bản tiếng Anh được mã hóa nằm tại `/breviary/en/` và chỉ được sinh khi có biến
 `BREVIARY_EN_PASSCODE` gồm đúng sáu chữ số. GitHub Actions đọc giá trị này từ
@@ -117,4 +133,4 @@ Script lưu HTML gốc vào:
 - `.cache/source.html`
 - `build/source.html`
 
-Nếu GitHub Actions báo lỗi parse, xem log workflow và file debug nói trên trong artifact/log local. Khi không tách được đủ 7 giờ kinh, script vẫn tạo `site/error.html` để đọc nguyên nhân, nhưng trả exit code khác 0 để Actions báo lỗi.
+Nếu GitHub Actions báo lỗi parse, xem log workflow và file debug nói trên trong artifact/log local. Khi không tách được đủ 7 giờ kinh hoặc không lấy được Bài đọc Thánh lễ, script vẫn tạo `site/error.html` để đọc nguyên nhân, nhưng trả exit code khác 0 để Actions báo lỗi.

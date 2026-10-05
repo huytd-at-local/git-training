@@ -1,0 +1,14 @@
+{
+  "success": true,
+  "data": {
+    "mass_reading": [
+      {
+        "is_special": true,
+        "date_info": {
+          "daily_title": "Ngày phụng vụ đặc biệt — mẫu kiểm thử"
+        },
+        "special_content": "<div class=\"reading1 division\"><div class=\"division-header\"><span>Bài đọc 1</span></div>\n<div class=\"selectable\"><p class=\"indexing\">St 1,1-2</p><p><sup>1a</sup> Bài đọc đầy đủ mặc định.</p><p><em>Lời hướng dẫn nguồn.</em></p></div>\n<div class=\"selectable\"><p>Bản rút gọn không được chọn.</p></div></div>\n<div class=\"responsory division\"><div class=\"division-header\">Đáp ca</div><p class=\"response\"><span class=\"pre\">Đ.</span><span class=\"body\">Lạy Chúa, xin đáp lời.</span></p></div>\n<div class=\"gospel division\"><div class=\"division-header\"><span>Tin Mừng</span></div><div class=\"selectable\"><p class=\"indexing\">Ga 1,1-5</p><p><sup>1</sup> Lời Tin Mừng mặc định.</p></div><div class=\"selectable\"><p>Tin Mừng khác không được chọn.</p></div></div>\n<ul class=\"dropdown-menu\"><li>Menu lựa chọn nguồn</li></ul><button onclick=\"alert(1)\">Nút nguồn</button><script>alert(1)</script>"
+      }
+    ]
+  }
+}

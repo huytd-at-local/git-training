@@ -1,0 +1,135 @@
+{
+  "success": true,
+  "msg": null,
+  "data": {
+    "mass_reading": [
+      {
+        "date_info": {
+          "season": "ORD",
+          "main_title": "Ngày 07 tháng 10",
+          "sub_title": "Kính trọng thể lễ Đức Mẹ Mân Côi",
+          "rank": null
+        },
+        "display_text": "Kính trọng thể lễ Đức Mẹ Mân Côi",
+        "introit": [
+          {
+            "INDEXING": "Lc 1,28.42",
+            "CONTENT": "<p>Xin vui mừng lên,</p><p>lạy Đức Ma-ri-a đầy ân sủng,</p><p>Đức Chúa ở cùng bà.</p><p>Bà là người có phúc nhất trong giới phụ nữ,</p><p>và người con bà cưu mang</p><p>cũng thật là có phúc.</p>"
+          }
+        ],
+        "reading1": [
+          {
+            "INDEXING": "Cv 1,12-14",
+            "EPITOMIZE": "Các Tông Đồ chuyên cần cầu nguyện cùng với bà Ma-ri-a, thân mẫu Đức Giê-su.",
+            "LEAD": "Bài trích sách Công vụ Tông Đồ.",
+            "CONTENT": "<p><sup>12</sup> Sau khi Đức Giê-su được rước lên trời, các Tông Đồ từ núi gọi là núi Ô-liu trở về Giê-ru-sa-lem. Núi này ở gần Giê-ru-sa-lem, cách đoạn đường được phép đi trong ngày sa-bát. <sup>13</sup> Trở về nhà, các ông lên lầu trên, là nơi các ông trú ngụ. Đó là các ông : Phê-rô, Gio-an, Gia-cô-bê, An-rê, Phi-líp-phê, Tô-ma, Ba-tô-lô-mê-ô, Mát-thêu, Gia-cô-bê con ông An-phê, Si-môn thuộc nhóm Nhiệt Thành, và Giu-đa con ông Gia-cô-bê. <sup>14</sup> Tất cả các ông đều đồng tâm nhất trí, chuyên cần cầu nguyện cùng với mấy người phụ nữ, với bà Ma-ri-a thân mẫu Đức Giê-su, và với anh em của Đức Giê-su.</p>",
+            "INDEXING_2": "Lc 1,46-47.48-49.50-51.52-53.54-55 (Đ. c.49)",
+            "CONTENT_2": "<p class=\"response\"><span class=\"pre\">Đ.</span><span class=\"body\">Đấng Toàn Năng đã làm cho tôi<br />biết bao điều cao cả,<br />danh Người thật chí thánh chí tôn !</span></p><p class=\"leading\"><sup>46</sup><span>Linh hồn tôi ngợi khen Đức Chúa,</span><sup>47</sup><span>thần trí tôi hớn hở vui mừng<br />vì Thiên Chúa, Đấng cứu độ tôi.</span></p><p class=\"response\"><span class=\"pre\">Đ.</span><span class=\"body\">Đấng Toàn Năng đã làm cho tôi<br />biết bao điều cao cả,<br />danh Người thật chí thánh chí tôn !</span></p><p class=\"leading\"><sup>48</sup><span>Phận nữ tỳ hèn mọn,<br />Người đoái thương nhìn tới ;<br />từ nay, hết mọi đời<br />sẽ khen tôi diễm phúc.</span><sup>49</sup><span>Đấng Toàn Năng đã làm cho tôi<br />biết bao điều cao cả,<br />danh Người thật chí thánh chí tôn !</span></p><p class=\"response\"><span class=\"pre\">Đ.</span><span class=\"body\">Đấng Toàn Năng đã làm cho tôi<br />biết bao điều cao cả,<br />danh Người thật chí thánh chí tôn !</span></p><p class=\"leading\"><sup>50</sup><span>Đời nọ tới đời kia,<br />Chúa hằng thương xót những ai kính sợ Người.</span><sup>51</sup><span>Chúa giơ tay biểu dương sức mạnh,<br />dẹp tan phường lòng trí kiêu căng.</span></p><p class=\"response\"><span class=\"pre\">Đ.</span><span class=\"body\">Đấng Toàn Năng đã làm cho tôi<br />biết bao điều cao cả,<br />danh Người thật chí thánh chí tôn !</span></p><p class=\"leading\"><sup>52</sup><span>Chúa hạ bệ những ai quyền thế,<br />Người nâng cao mọi kẻ khiêm nhường.</span><sup>53</sup><span>Kẻ đói nghèo, Chúa ban của đầy dư,<br />người giàu có, lại đuổi về tay trắng.</span></p><p class=\"response\"><span class=\"pre\">Đ.</span><span class=\"body\">Đấng Toàn Năng đã làm cho tôi<br />biết bao điều cao cả,<br />danh Người thật chí thánh chí tôn !</span></p><p class=\"leading\"><sup>54</sup><span>Chúa độ trì Ít-ra-en, tôi tớ của Người,</span><sup>55</sup><span>như đã hứa cùng cha ông chúng ta,<br />vì Người nhớ lại lòng thương xót<br />dành cho tổ phụ Áp-ra-ham<br />và cho con cháu đến muôn đời.</span></p><p class=\"response\"><span class=\"pre\">Đ.</span><span class=\"body\">Đấng Toàn Năng đã làm cho tôi<br />biết bao điều cao cả,<br />danh Người thật chí thánh chí tôn !</span></p>",
+            "OPTIONAL_INDEXING": null,
+            "OPTIONAL_CONTENT": "Lạy Đức Trinh Nữ Ma-ri-a, Mẹ thật là diễm phúc,<br />vì đã cưu mang Con Chúa Cha hằng hữu."
+          }
+        ],
+        "reading2": [
+          {
+            "INDEXING": "Gl 4,4-7",
+            "EPITOMIZE": "Thiên Chúa đã sai Con mình tới, sinh làm con một người phụ nữ.",
+            "LEAD": "Bài trích thư của thánh Phao-lô tông đồ gửi tín hữu Ga-lát.",
+            "CONTENT": "<p><sup>4</sup> Thưa anh em, khi thời gian tới hồi viên mãn, Thiên Chúa đã sai Con mình tới, sinh làm con một người phụ nữ, và sống dưới Lề Luật, <sup>5</sup> để chuộc những ai sống dưới Lề Luật, hầu chúng ta nhận được ơn làm nghĩa tử. <sup>6</sup> Để chứng thực anh em là con cái, Thiên Chúa đã sai Thần Khí của Con mình đến ngự trong lòng anh em mà kêu lên : “Áp-ba, Cha ơi !” <sup>7</sup> Vậy anh em không còn phải là nô lệ nữa, nhưng là con, mà đã là con thì cũng là người thừa kế, nhờ Thiên Chúa.</p>",
+            "INDEXING_2": "Lc 1,46-47.48-49.50-51.52-53.54-55 (Đ. c.49)",
+            "CONTENT_2": "<p class=\"response\"><span class=\"pre\">Đ.</span><span class=\"body\">Đấng Toàn Năng đã làm cho tôi<br />biết bao điều cao cả,<br />danh Người thật chí thánh chí tôn !</span></p><p class=\"leading\"><sup>46</sup><span>Linh hồn tôi ngợi khen Đức Chúa,</span><sup>47</sup><span>thần trí tôi hớn hở vui mừng<br />vì Thiên Chúa, Đấng cứu độ tôi.</span></p><p class=\"response\"><span class=\"pre\">Đ.</span><span class=\"body\">Đấng Toàn Năng đã làm cho tôi<br />biết bao điều cao cả,<br />danh Người thật chí thánh chí tôn !</span></p><p class=\"leading\"><sup>48</sup><span>Phận nữ tỳ hèn mọn,<br />Người đoái thương nhìn tới ;<br />từ nay, hết mọi đời<br />sẽ khen tôi diễm phúc.</span><sup>49</sup><span>Đấng Toàn Năng đã làm cho tôi<br />biết bao điều cao cả,<br />danh Người thật chí thánh chí tôn !</span></p><p class=\"response\"><span class=\"pre\">Đ.</span><span class=\"body\">Đấng Toàn Năng đã làm cho tôi<br />biết bao điều cao cả,<br />danh Người thật chí thánh chí tôn !</span></p><p class=\"leading\"><sup>50</sup><span>Đời nọ tới đời kia,<br />Chúa hằng thương xót những ai kính sợ Người.</span><sup>51</sup><span>Chúa giơ tay biểu dương sức mạnh,<br />dẹp tan phường lòng trí kiêu căng.</span></p><p class=\"response\"><span class=\"pre\">Đ.</span><span class=\"body\">Đấng Toàn Năng đã làm cho tôi<br />biết bao điều cao cả,<br />danh Người thật chí thánh chí tôn !</span></p><p class=\"leading\"><sup>52</sup><span>Chúa hạ bệ những ai quyền thế,<br />Người nâng cao mọi kẻ khiêm nhường.</span><sup>53</sup><span>Kẻ đói nghèo, Chúa ban của đầy dư,<br />người giàu có, lại đuổi về tay trắng.</span></p><p class=\"response\"><span class=\"pre\">Đ.</span><span class=\"body\">Đấng Toàn Năng đã làm cho tôi<br />biết bao điều cao cả,<br />danh Người thật chí thánh chí tôn !</span></p><p class=\"leading\"><sup>54</sup><span>Chúa độ trì Ít-ra-en, tôi tớ của Người,</span><sup>55</sup><span>như đã hứa cùng cha ông chúng ta,<br />vì Người nhớ lại lòng thương xót<br />dành cho tổ phụ Áp-ra-ham<br />và cho con cháu đến muôn đời.</span></p><p class=\"response\"><span class=\"pre\">Đ.</span><span class=\"body\">Đấng Toàn Năng đã làm cho tôi<br />biết bao điều cao cả,<br />danh Người thật chí thánh chí tôn !</span></p>",
+            "OPTIONAL_INDEXING": null,
+            "OPTIONAL_CONTENT": "Lạy Đức Trinh Nữ Ma-ri-a, Mẹ thật là diễm phúc,<br />vì đã cưu mang Con Chúa Cha hằng hữu."
+          }
+        ],
+        "gospel": [
+          {
+            "INDEXING": "Lc 1,26-38",
+            "EPITOMIZE": "Này đây bà sẽ thụ thai, sinh hạ một con trai.",
+            "LEAD": "<span class=\"holycross\">&#x2720;</span>Tin Mừng Chúa Giê-su Ki-tô theo thánh Lu-ca.",
+            "CONTENT": "<p><sup>26</sup> Khi ấy, bà Ê-li-sa-bét có thai được sáu tháng, thì Thiên Chúa sai sứ thần Gáp-ri-en đến một thành miền Ga-li-lê, gọi là Na-da-rét, <sup>27</sup> gặp một trinh nữ đã thành hôn với một người tên là Giu-se, thuộc dòng dõi vua Đa-vít. Trinh nữ ấy tên là Ma-ri-a.</p><p><sup>28</sup> Sứ thần vào nhà trinh nữ và nói : “Mừng vui lên, hỡi Đấng đầy ân sủng, Đức Chúa ở cùng bà.” <sup>29</sup> Nghe lời ấy, bà rất bối rối, và tự hỏi lời chào như vậy có nghĩa gì.</p><p><sup>30</sup> Sứ thần liền nói : “Thưa bà Ma-ri-a, xin đừng sợ, vì bà được đẹp lòng Thiên Chúa. <sup>31</sup> Này đây bà sẽ thụ thai, sinh hạ một con trai, và đặt tên là Giê-su. <sup>32</sup> Người sẽ nên cao cả, và sẽ được gọi là Con Đấng Tối Cao. Đức Chúa là Thiên Chúa sẽ ban cho Người ngai vàng vua Đa-vít, tổ tiên Người. <sup>33</sup> Người sẽ trị vì nhà Gia-cóp đến muôn đời, và triều đại của Người sẽ vô cùng vô tận.”</p><p><sup>34</sup> Bà Ma-ri-a thưa với sứ thần : “Việc ấy sẽ xảy ra thế nào, vì tôi không biết đến việc vợ chồng ?”</p><p><sup>35</sup> Sứ thần đáp : “Thánh Thần sẽ ngự xuống trên bà, và quyền năng Đấng Tối Cao sẽ toả bóng trên bà ; vì thế, Đấng Thánh sắp sinh ra sẽ được gọi là Con Thiên Chúa. <sup>36</sup> Kìa bà Ê-li-sa-bét, người họ hàng với bà, tuy già rồi, mà cũng đang cưu mang một người con trai : bà ấy vẫn bị mang tiếng là hiếm hoi, mà nay đã có thai được sáu tháng, <sup>37</sup> vì đối với Thiên Chúa, không có gì là không thể làm được.”</p><p><sup>38</sup> Bấy giờ bà Ma-ri-a nói với sứ thần : “Vâng, tôi đây là nữ tỳ của Chúa, xin Người thực hiện cho tôi như lời sứ thần nói.” Rồi sứ thần từ biệt ra đi.</p>",
+            "INDEXING_2": "x. Lc 1,28",
+            "CONTENT_2": "<p>Ha-lê-lui-a. Ha-lê-lui-a. Kính chào Đức Ma-ri-a, Mẹ đầy ân sủng, Thiên Chúa ở cùng Mẹ, Mẹ có phúc hơn mọi người phụ nữ. Ha-lê-lui-a.</p>",
+            "OPTIONAL_INDEXING": null,
+            "OPTIONAL_CONTENT": null
+          }
+        ],
+        "communion": [
+          {
+            "INDEXING": "Lc 1,31",
+            "CONTENT": "<p>Thiên sứ nói với Đức Ma-ri-a rằng :</p><p>“Này bà sẽ thụ thai, sinh hạ một con trai</p><p>và đặt tên là Giê-su.\"</p>"
+          }
+        ],
+        "special_content": null,
+        "is_special": false
+      },
+      {
+        "date_info": {
+          "season": "ORD",
+          "daily_title": "Chúa Nhật Tuần XXVII - Mùa Thường Niên"
+        },
+        "display_text": "Ngày thường",
+        "introit": [
+          {
+            "INDEXING": "Et 13,9.10-11",
+            "CONTENT": "<p>Lạy Chúa,</p><p>Chúa an bài mọi sự theo thánh ý của Ngài</p><p>mà không ai cưỡng nổi.</p><p>Ngài tạo thành vũ trụ</p><p>cùng muôn loài hiện hữu dưới bầu trời.</p><p>Chính Ngài là Chúa Tể càn khôn.</p>"
+          }
+        ],
+        "reading1": [
+          {
+            "INDEXING": "Is 5,1-7",
+            "EPITOMIZE": "Vườn nho của Đức Chúa các đạo binh, chính là nhà Ít-ra-en.",
+            "LEAD": "Bài trích sách ngôn sứ I-sai-a.",
+            "CONTENT": "<p class=\"poem\"><sup>1</sup><span>Tôi xin hát tặng bạn thân tôi,<br />bài ca của bạn tôi về vườn nho của mình.<br />Bạn thân tôi có một vườn nho trên sườn đồi mầu mỡ.</span><br /><sup>2</sup><span>Anh ra tay cuốc đất nhặt đá,<br />giống nho quý đem trồng,<br />giữa vườn, anh xây một vọng gác,<br />rồi khoét bồn đạp nho.<br />Anh những mong nó sinh trái tốt,<br />nó lại sinh nho dại.</span><br /><sup>3</sup><span>Vậy bây giờ,<br />dân Giê-ru-sa-lem và người Giu-đa hỡi,<br />xin phân xử đôi đàng giữa tôi với vườn nho.</span><br /><sup>4</sup><span>Có gì làm hơn được cho vườn nho của tôi,<br />mà tôi đã chẳng làm ?<br />Tôi những mong trái tốt, sao nó sinh nho dại ?</span><br /><sup>5</sup><span>Vậy bây giờ tôi cho các người biết<br />tôi đối xử thế nào với vườn nho của tôi :<br />hàng giậu thì chặt phá cho vườn bị tan hoang,<br />bờ tường thì đập đổ cho vườn bị giày xéo.</span><br /><sup>6</sup><span>Tôi sẽ biến thửa vườn thành mảnh đất hoang vu,<br />không tỉa cành nhổ cỏ, gai góc mọc um tùm ;<br />sẽ truyền lệnh cho mây đừng đổ mưa tưới xuống.</span><br /><sup>7</sup><span>Vườn nho của Đức Chúa các đạo binh,<br />chính là nhà Ít-ra-en đó ;<br />cây nho Chúa mến yêu quý chuộng,<br />ấy chính là dân xứ Giu-đa.<br />Người những mong họ sống công bình,<br />mà chỉ thấy toàn là đổ máu ;<br />đợi chờ họ làm điều chính trực,<br />mà chỉ nghe vẳng tiếng khóc than.<br /></span></p>",
+            "INDEXING_2": "Tv 79,9 và 12.13-14.15-16.19-20 (Đ. Is 5,7a)",
+            "CONTENT_2": "<p class=\"response\"><span class=\"pre\">Đ.</span><span class=\"body\">Vườn nho của Chúa là nhà Ít-ra-en.</span></p><p class=\"leading\"><sup>9</sup><span>Gốc nho này, Chúa bứng từ Ai-cập,<br />đuổi chư dân, lấy chỗ mà trồng,</span><sup>12</sup><span>nhánh vươn dài tới phía đại dương,<br />chồi mọc xa đến tận miền Sông Cả.</span></p><p class=\"response\"><span class=\"pre\">Đ.</span><span class=\"body\">Vườn nho của Chúa là nhà Ít-ra-en.</span></p><p class=\"leading\"><sup>13</sup><span>Tường rào nó, vậy sao Ngài phá đổ ?<br />Khách qua đường mặc sức hái mà ăn !</span><sup>14</sup><span>Heo rừng vào phá phách,<br />dã thú gặm tan hoang.</span></p><p class=\"response\"><span class=\"pre\">Đ.</span><span class=\"body\">Vườn nho của Chúa là nhà Ít-ra-en.</span></p><p class=\"leading\"><sup>15</sup><span>Lạy Chúa Tể càn khôn, xin trở lại,<br />tự cõi trời, xin ngó xuống mà xem,<br />xin Ngài thăm nom vườn nho cũ,</span><sup>16</sup><span>bảo vệ cây tay hữu Chúa đã trồng,<br />và chồi non được Ngài ban sức mạnh.</span></p><p class=\"response\"><span class=\"pre\">Đ.</span><span class=\"body\">Vườn nho của Chúa là nhà Ít-ra-en.</span></p><p class=\"leading\"><sup>19</sup><span>Chúng con nguyền chẳng xa Chúa nữa đâu,<br />cúi xin Ngài ban cho được sống,<br />để chúng con xưng tụng danh Ngài. </span><sup>20</sup><span>Lạy Chúa là Chúa Tể càn khôn,<br />xin phục hồi chúng con,<br />xin toả ánh tôn nhan rạng ngời<br />để chúng con được ơn cứu độ.</span></p><p class=\"response\"><span class=\"pre\">Đ.</span><span class=\"body\">Vườn nho của Chúa là nhà Ít-ra-en.</span></p>",
+            "OPTIONAL_INDEXING": null,
+            "OPTIONAL_CONTENT": null
+          }
+        ],
+        "reading2": [
+          {
+            "INDEXING": "Pl 4,6-9",
+            "EPITOMIZE": "Anh em hãy đem những điều này ra thực hành, và Thiên Chúa là nguồn bình an sẽ ở với anh em.",
+            "LEAD": "Bài trích thư của thánh Phao-lô tông đồ gửi tín hữu Phi-líp-phê.",
+            "CONTENT": "<p><sup>6</sup> Thưa anh em, anh em đừng lo lắng gì cả, nhưng trong mọi hoàn cảnh, anh em cứ đem lời cầu khẩn, van xin và tạ ơn, mà giãi bày trước mặt Thiên Chúa những điều anh em thỉnh nguyện. <sup>7</sup> Và bình an của Thiên Chúa là bình an vượt lên trên mọi hiểu biết, sẽ giữ cho lòng trí anh em được kết hợp với Đức Ki-tô Giê-su. <sup>8</sup> Ngoài ra, thưa anh em, những gì là chân thật, cao quý, những gì là chính trực tinh tuyền, những gì là đáng mến và đem lại danh thơm tiếng tốt, những gì là đức hạnh, đáng khen, thì xin anh em hãy để ý. <sup>9</sup> Những gì anh em đã học hỏi, đã lãnh nhận, đã nghe, đã thấy ở nơi tôi, thì hãy đem ra thực hành, và Thiên Chúa là nguồn bình an sẽ ở với anh em.</p>",
+            "INDEXING_2": null,
+            "CONTENT_2": null,
+            "OPTIONAL_INDEXING": null,
+            "OPTIONAL_CONTENT": null
+          }
+        ],
+        "gospel": [
+          {
+            "INDEXING": "Mt 21,33-43",
+            "EPITOMIZE": "Ông chủ sẽ cho các tá điền khác canh tác vườn nho.",
+            "LEAD": "<span class=\"holycross\">&#x2720;</span>Tin Mừng Chúa Giê-su Ki-tô theo thánh Mát-thêu.",
+            "CONTENT": "<p><sup>33</sup> Khi ấy, Đức Giê-su nói với các thượng tế và kỳ mục trong dân rằng : “Các ông hãy nghe dụ ngôn sau đây : Có chủ nhà kia trồng được một vườn nho ; chung quanh vườn, ông rào giậu ; trong vườn, ông khoét bồn đạp nho, và xây một tháp canh. Ông cho tá điền canh tác, rồi trẩy đi xa. <sup>34</sup> Gần đến mùa hái nho, ông sai đầy tớ đến gặp các tá điền để thu hoa lợi. <sup>35</sup> Bọn tá điền bắt các đầy tớ ông : chúng đánh người này, giết người kia, ném đá người nọ. <sup>36</sup> Ông lại sai một số đầy tớ khác đông hơn trước ; nhưng bọn tá điền cũng xử với họ y như vậy. <sup>37</sup> Sau cùng, ông sai con trai mình đến gặp chúng, vì nghĩ rằng : ‘Chúng sẽ nể con ta.’ <sup>38</sup> Nhưng bọn tá điền vừa thấy người con, thì bảo nhau : ‘Đứa thừa tự đây rồi ! Nào ta giết quách nó đi, và đoạt lấy gia tài nó !’ <sup>39</sup> Thế là chúng bắt lấy cậu, tống ra khỏi vườn nho và giết đi. <sup>40</sup> Vậy khi ông chủ vườn nho đến, ông sẽ làm gì bọn tá điền kia ?” <sup>41</sup> Họ đáp : “Ác giả ác báo, ông sẽ tru diệt bọn chúng và cho các tá điền khác canh tác vườn nho, để cứ đúng mùa, họ nộp hoa lợi cho ông.” <sup>42</sup> Đức Giê-su bảo họ : “Kinh Thánh có câu : ‘Tảng đá thợ xây nhà loại bỏ lại trở nên đá tảng góc tường. Đó chính là công trình của Chúa, công trình kỳ diệu trước mắt chúng ta.’ Các ông chưa bao giờ đọc câu này sao ?</p><p><sup>43</sup> “Bởi đó, tôi nói cho các ông hay : Nước Thiên Chúa, Người sẽ lấy đi không cho các ông nữa, mà ban cho một dân biết làm cho Nước ấy sinh hoa lợi.”</p>",
+            "INDEXING_2": "x. Ga 15,16",
+            "CONTENT_2": "<p>Ha-lê-lui-a. Ha-lê-lui-a. Chúa nói : Chính Thầy đã chọn anh em từ giữa thế gian, để anh em ra đi, sinh được hoa trái, và hoa trái của anh em tồn tại. Ha-lê-lui-a.</p>",
+            "OPTIONAL_INDEXING": null,
+            "OPTIONAL_CONTENT": null
+          }
+        ],
+        "communion": [
+          {
+            "INDEXING": "Ac 3,25",
+            "CONTENT": "<p>Chúa nhân hậu từ bi</p><p>với những kẻ một niềm trông cậy,</p><p>và tha thiết kiếm tìm Người.</p>"
+          },
+          {
+            "INDEXING": "1 Cr 10,17",
+            "CONTENT": "<p>Chỉ có một tấm bánh, nên tuy nhiều người,</p><p>chúng ta cũng chỉ là một thân thể,</p><p>vì mọi người cùng chia sẻ</p><p>một tấm bánh và một chén rượu mà thôi.</p>"
+          }
+        ],
+        "special_content": null,
+        "is_special": false
+      }
+    ],
+    "today": {
+      "date": "04",
+      "month": "10",
+      "year": "2026",
+      "weekday": "SUN"
+    },
+    "limit": true
+  }
+}
